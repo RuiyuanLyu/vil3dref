@@ -9,6 +9,7 @@ from utils.decorators import mmengine_track_func
 
 dataroot_mp3d = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/matterport3d/scans"
 dataroot_3rscan = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/3rscan/scans"
+dataroot_scannet = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/scannet/scans"
 output_dir = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_data_new"
 
 
@@ -28,8 +29,9 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
     if os.path.exists(out_file_name) and not overwrite:
         return True
     pc, color, label = load_pcd_data(scene)
-    semantic_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
+    instance_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
     bboxes =  es_anno["bboxes"]
+    bboxes[:, 3:6] = np.clip(bboxes[:, 3:6], a_min=1e-2, a_max=None)
     object_ids = es_anno["object_ids"]
     object_types = es_anno["object_types"] # str
     sorted_indices = sorted(enumerate(bboxes), key=lambda x: -np.prod(x[1][3:6])) # the larger the box, the smaller the index
@@ -44,8 +46,8 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
         R = euler_angles_to_matrix(euler, convention="ZXY")
         R = R.reshape((3,3))
         box_pc_indices = is_inside_box(pc, center, size, R)
-        semantic_ids[box_pc_indices] = obj_id
-    out_data = (pc, color, label, semantic_ids)
+        instance_ids[box_pc_indices] = obj_id
+    out_data = (pc, color, label, instance_ids)
     os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
     torch.save(out_data, out_file_name)
     return True
@@ -60,14 +62,13 @@ def create_instance_id_mapping(scene, es_anno, overwrite=False):
     object_types = es_anno["object_types"] # str
     out_list = []
     if len(object_ids) > 0:
-        max_id = np.max(object_ids)
-        out_list = ["placeholder"] * (max_id+1)
-        for obj_id, obj_type in zip(object_ids, object_types):
-            out_list[obj_id] = obj_type
+        for obj_type in object_types:
+            out_list.append(obj_type)
     os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
     with open(out_file_name, "w") as f:
         json.dump(out_list, f)
     return True
+# 检查下scannet数据是从哪里来的
 
 def create_instance_id_loc(scene, es_anno, overwrite=False):
     if es_anno is None:
@@ -79,41 +80,45 @@ def create_instance_id_loc(scene, es_anno, overwrite=False):
     object_ids = es_anno["object_ids"]
     out_array = np.zeros((0, 9))
     if len(object_ids) > 0:
-        max_id = np.max(object_ids)
-        out_array = np.zeros((max_id+1, 9))
-        for obj_id, bbox in zip(object_ids, object_bboxes):
-            out_array[obj_id] = bbox
+        out_array = np.zeros((len(object_bboxes), 9))
+        for i, bbox in enumerate(object_bboxes):
+            out_array[i] = bbox
     os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
     np.save(out_file_name, out_array)
     return True
 
 from sklearn.mixture import GaussianMixture
 
-def create_instance_colors(scene, _, overwrite=False):
+def create_instance_colors(scene, __, overwrite=False):
     # copied from preprocess/scannetv2/precompute_instance_colors.py
     out_file_name = os.path.join(output_dir, 'instance_id_to_gmm_color', '%s.json'%scene)
     if os.path.exists(out_file_name) and not overwrite:
         return
 
     scan_file = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
-    data = torch.load(scan_file) # xyz, rgb, semantic_labels, instance_labels
-    colors = data[1]
-    instance_labels = data[3]
-
+    data = torch.load(scan_file) # xyz, rgb, obj_type, instance_labels
+    _, colors, _, instance_labels = data
     if instance_labels is None:
         return
 
     # normalize
-    colors = colors / 127.5 - 1 
-    
+    # color might be [0, 255], or [0, 1], or [-1, 1]. need to normalize to [-1, 1]
+    if np.all((colors >= 0) & (colors <= 1)):
+        colors = colors * 2 - 1
+    elif np.all((colors >= 0) & (colors <= 255)):
+        colors = colors / 127.5 - 1
+    assert np.all((colors >= -1) & (colors <= 1))
+
     clustered_colors = []
-    for i in range(instance_labels.max() + 1):
+    instance_ids = sorted(list(set(instance_labels)))
+    instance_ids = [x for x in instance_ids if x >= 0]
+    for i in instance_ids:
         mask = instance_labels == i     # time consuming
         obj_colors = colors[mask]
         if len(obj_colors) < 10:
             clustered_colors.append({
                 'weights': [0.0,0.0,0.0],
-                'means': [0.0,0.0,0.0],
+                'means': [[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0]]
             })
             continue
         gm = GaussianMixture(n_components=3, covariance_type='full', random_state=0).fit(obj_colors)
@@ -129,18 +134,20 @@ def create_instance_colors(scene, _, overwrite=False):
 
 @mmengine_track_func
 def create_all(scene, es_anno):
-    create_scene_pcd(scene, es_anno, overwrite=False)
-    create_instance_colors(scene, es_anno, overwrite=False)
-    create_instance_id_mapping(scene, es_anno, overwrite=False)
-    create_instance_id_loc(scene, es_anno, overwrite=False)
+    create_scene_pcd(scene, es_anno, overwrite=True)
+    create_instance_colors(scene, es_anno, overwrite=True)
+    create_instance_id_mapping(scene, es_anno, overwrite=True)
+    create_instance_id_loc(scene, es_anno, overwrite=True)
 
 
 if __name__ == "__main__":
-    MODE = "3rscan"
+    MODE = "mp3d"
     if MODE == "mp3d":
         DATAROOT = dataroot_mp3d
     elif MODE == "3rscan":
         DATAROOT = dataroot_3rscan
+    elif MODE == "scannet":
+        DATAROOT = dataroot_scannet
 
     scene_list = os.listdir(DATAROOT)[:50]
     embodiedscan_annotation_files = [
@@ -155,7 +162,7 @@ if __name__ == "__main__":
         scene_mappings = json.load(f)
     ####################################################################
     # save splits
-    mini_scenes = set(os.listdir(dataroot_mp3d)[:50] + os.listdir(dataroot_3rscan)[:50])
+    mini_scenes = set(os.listdir(dataroot_mp3d)[:50] + os.listdir(dataroot_3rscan)[:50] + os.listdir(dataroot_scannet))[:50]
     reverse_mapping = {v:k for k,v in scene_mappings.items()}
     with open(train_split_file, 'w') as f:
         for key in anno_train:
@@ -168,7 +175,6 @@ if __name__ == "__main__":
             if key in mini_scenes:
                 f.write(key + '\n')
     ####################################################################
-    # out start here
     es_annos = {**anno_train, **anno_val}
     tasks = []
     for scene in scene_list:
