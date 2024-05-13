@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import mmengine
 import json
-from utils.utils_read import read_annotation_pickles
+from og3d_src.utils.utils_read import read_annotation_pickles
 from utils.utils_3d import is_inside_box, euler_angles_to_matrix
 from utils.decorators import mmengine_track_func
 
@@ -149,6 +149,7 @@ if __name__ == "__main__":
     assert MODE in ["mp3d", "3rscan", "scannet"]
     DATAROOT = eval(f"dataroot_{MODE}")
     scene_list = os.listdir(DATAROOT)[:50]
+    scene_list = ["scene0000_00"]
     embodiedscan_annotation_files = [
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_train_full.pkl",
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_val_full.pkl"

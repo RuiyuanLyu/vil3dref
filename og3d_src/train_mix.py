@@ -32,12 +32,16 @@ from model.referit3d_net_mix import ReferIt3DNetMix
 
 def build_datasets(data_cfg):
     trn_dataset = ESDataset(
-        es_info_file="embodiedscan_infos/embodiedscan_infos_train_full.pkl",
-        vg_raw_data_file="dataset/VG.json"
+        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl",
+        vg_raw_data_file="../datasets/VG.json",
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2glove42b.json',
+        processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     val_dataset = ESDataset(
-        es_info_file="embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
-        vg_raw_data_file="dataset/VG.json"
+        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
+        vg_raw_data_file="../datasets/VG.json",
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2glove42b.json',
+        processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     return trn_dataset, val_dataset
 

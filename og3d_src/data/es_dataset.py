@@ -5,7 +5,6 @@ import random
 
 from utils.utils_read import read_annotation_pickles
 from transformers import AutoTokenizer
-from data.glove_embedding import get_glove_word2vec
 
 import torch
 from torch.utils.data import Dataset
@@ -36,9 +35,14 @@ except:
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
 
 class ESDataset(Dataset):
-    def __init__(self, es_info_file, vg_raw_data_file):
+    def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
+        # from data.glove_embedding import get_glove_word2vec
+        # self.word2vec = get_glove_word2vec(glove_embedding_file)
+        self.word2vec = json.load(open(cat2vec_file, 'r'))
+        self.word2vec_vocab = list(self.word2vec.keys())
         self.es_info = read_annotation_pickles(es_info_file)
+        self.object_type_to_int = np.load(es_info_file)["metainfo"]["categories"]
         # self.es_info[scene_id] = {
         #     "bboxes": bboxes,
         #     "object_ids": object_ids,
@@ -52,12 +56,13 @@ class ESDataset(Dataset):
         # }
         self.vg_raw_data = json.load(open(vg_raw_data_file, 'r'))
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-        self.word2vec = get_glove_word2vec()
         self.scan_ids = list(self.es_info.keys())
         self.num_scans = len(self.scan_ids)
         self.num_points = 1024 # number of points to sample from each object
         # 需要维护两份数据，一份是关于bbox和pcd的，一份是关于vg txt的
         # vg txt的一个dict的例子：{'scan_id': 'scene0000_00', 'target_id': ['30'], 'distractor_ids': [], 'text': 'The X is used for sitting at the table.Please find the X.', 'target': ['stool'], 'anchors': [], 'anchor_ids': [], 'tokens_positive': [[33, 38], [4, 5], [55, 56]]}
+        self.scan_dir = processed_scan_dir
+        self.process_vg_raw_data()
 
     def process_vg_raw_data(self):
         self.vg_data = []
@@ -67,8 +72,14 @@ class ESDataset(Dataset):
             txt = item['text']
             txt_ids = self.tokenizer.encode(txt) 
             txt_len = len(txt_ids)
-            tgt_obj_idx = int(item['target_id'][0])
-            tgt_obj_class = item['target']
+            try:
+                tgt_obj_idx = item['target_id']
+                tgt_obj_idx = int(tgt_obj_idx[0]) if isinstance(tgt_obj_idx, list) else tgt_obj_idx
+            except Exception as e:
+                print(e)
+                print(item)
+                continue
+            tgt_obj_class = self.object_type_to_int(item['target'][0])
             vg_item = {
                 "item_id": item_id,
                 "scan_id": scan_id,
@@ -80,11 +91,19 @@ class ESDataset(Dataset):
             self.vg_data.append(vg_item)
         del self.vg_raw_data
 
+    def do_word2vec(self, text):
+        # TODO: solve for ood vocab.
+        if text in self.word2vec:
+            return self.word2vec[text]
+        else:
+            key = random.choice(self.word2vec_vocab)
+            return self.word2vec[key]
+
     def get_obj_inputs(self, scan_id):
         obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']]
-        obj_classes = self.es_info[scan_id]['object_type_int'] 
+        obj_classes = self.es_info[scan_id]['object_type_ints'] 
         obj_labels = self.es_info[scan_id]['object_types']
-        obj_gt_fts = [self.word2vec[obj_label] for obj_label in obj_labels]
+        obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
         obj_locs = self.es_info[scan_id]['bboxes']
         obj_colors = self.get_inst_colors(scan_id)
         scan_pcd, obj_pcds = self.get_scan_gt_pcd_data(scan_id)
@@ -101,30 +120,30 @@ class ESDataset(Dataset):
         return obj_item
 
     def get_inst_colors(self, scan_id):
-        scan_dir = "datasets/referit3d/scan_data_new"
-        inst_colors = json.load(open(os.path.join(scan_dir, 'instance_id_to_gmm_color', '%s.json'%scan_id)))
+        fname = os.path.join(self.scan_dir, 'instance_id_to_gmm_color', f'{scan_id}.json')
+        with open(fname, 'r') as f:
+            inst_colors = json.load(f)
         inst_colors = [np.concatenate(
             [np.array(x['weights'])[:, None], np.array(x['means'])],
             axis=1
         ).astype(np.float32) for x in inst_colors]
+        return inst_colors
 
     def get_scan_gt_pcd_data(self, scan_id):
         """
             returns pcd_data and obj_pcds
         """
-        pcd_data_path = os.path.join(
-            'pcd_data', 'scannet', scan_id, 'pc_infos.npy')
+        pcd_data_path = os.path.join(self.scan_dir, 'pcd_with_global_alignment', f'{scan_id}.pth')
         if not os.path.exists(pcd_data_path):
             print(f"Error: {pcd_data_path} does not exist.")
             return None
-        pcd_data = np.load(pcd_data_path)
-        # pcd_data[:, :3]: xyz
-        # pcd_data[:, 3:6]: rgb
-        # pcd_data[:, 6]: instance id
+        data = torch.load(pcd_data_path)
+        pc, colors, label, instance_ids = data
+        pcd_data = np.concatenate([pc, colors], 1)
         obj_pcds = []
         for obj_id in self.es_info[scan_id]['object_ids']:
             obj_id = int(obj_id)
-            mask = pcd_data[:, 6] == obj_id
+            mask = instance_ids == obj_id
             obj_pcd = pcd_data[mask]
             obj_pcds.append(obj_pcd)
         return pcd_data, obj_pcds
@@ -132,18 +151,21 @@ class ESDataset(Dataset):
     def get_obj_fts(self, obj_pcds):
         obj_fts = []
         for obj_pcd in obj_pcds:
-            pcd_idxs = np.random.choice(len(obj_pcd), size=self.num_points, replace=(len(obj_pcd) < self.num_points))
-            obj_pcd = obj_pcd[pcd_idxs]
-            obj_pcd[:, :3] = obj_pcd[:, :3] - obj_pcd[:, :3].mean(0)
-            max_dist = np.max(np.sqrt(np.sum(obj_pcd[:, :3]**2, 1)))
-            if max_dist < 1e-6: # take care of tiny point-clouds, i.e., padding
-                max_dist = 1
-            obj_pcd[:, :3] = obj_pcd[:, :3] / max_dist
+            if len(obj_pcd) > 0:
+                pcd_idxs = np.random.choice(len(obj_pcd), size=self.num_points, replace=(len(obj_pcd) < self.num_points))
+                obj_pcd = obj_pcd[pcd_idxs]
+                obj_pcd[:, :3] = obj_pcd[:, :3] - obj_pcd[:, :3].mean(0)
+                max_dist = np.max(np.sqrt(np.sum(obj_pcd[:, :3]**2, 1)))
+                if max_dist < 1e-6: # take care of tiny point-clouds, i.e., padding
+                    max_dist = 1
+                obj_pcd[:, :3] = obj_pcd[:, :3] / max_dist
+            else:
+                obj_pcd = np.zeros((self.num_points, 6))
             obj_fts.append(obj_pcd)
         return obj_fts
 
     def __len__(self):
-        return self.data
+        return len(self.vg_data)
 
     def __getitem__(self, idx):
         item = self.vg_data[idx]

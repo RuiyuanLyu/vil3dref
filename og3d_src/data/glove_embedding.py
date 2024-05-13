@@ -1,5 +1,5 @@
 import numpy as np
-def get_glove_word2vec(file='datasets/pretrained/wordvecs/glove.42B.300d.txt'):
+def get_glove_word2vec(file):
     word2vec = {}
     with open(file, 'r') as f:
         for line in f:
