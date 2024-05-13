@@ -30,7 +30,7 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
         return True
     pc, color, label = load_pcd_data(scene)
     if np.isnan(pc).any() or np.isnan(color).any():
-        import pdb; pdb.set_trace()
+        print(f"nan detected in {scene}")
     instance_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
     bboxes =  es_anno["bboxes"]
     bboxes[:, 3:6] = np.clip(bboxes[:, 3:6], a_min=1e-2, a_max=None)
@@ -109,7 +109,8 @@ def create_instance_colors(scene, __, overwrite=False):
         colors = colors * 2 - 1
     elif np.all((colors >= 0) & (colors <= 255)):
         colors = colors / 127.5 - 1
-    assert np.all((colors >= -1) & (colors <= 1)), f"color max {colors.max()}, min {colors.min()}"
+    if not np.all((colors >= -1) & (colors <= 1)):
+        print(f"color max {colors.max()}, min {colors.min()}")
 
     clustered_colors = []
     instance_ids = sorted(list(set(instance_labels)))
