@@ -180,25 +180,25 @@ class ESDataset(Dataset):
         }
         return outs
 
-    def collate_fn(self, data):
-        # input: list of dicts, each dict is the output of __getitem__
-        outs = {}
-        for key in data[0].keys():
-            outs[key] = [x[key] for x in data]
-        outs['txt_ids'] = pad_sequence(outs['txt_ids'], batch_first=True)
-        outs['txt_lens'] = torch.LongTensor(outs['txt_lens'])
-        outs['txt_masks'] = gen_seq_masks(outs['txt_lens'])
+def es_collate_fn(data):
+    # input: list of dicts, each dict is the output of __getitem__
+    outs = {}
+    for key in data[0].keys():
+        outs[key] = [x[key] for x in data]
+    outs['txt_ids'] = pad_sequence(outs['txt_ids'], batch_first=True)
+    outs['txt_lens'] = torch.LongTensor(outs['txt_lens'])
+    outs['txt_masks'] = gen_seq_masks(outs['txt_lens'])
 
-        outs['obj_gt_fts'] = pad_tensors(outs['obj_gt_fts'], lens=outs['obj_lens'])
-        outs['obj_fts'] = pad_tensors(outs['obj_fts'], lens=outs['obj_lens'], pad_ori_data=True)
-        outs['obj_locs'] = pad_tensors(outs['obj_locs'], lens=outs['obj_lens'], pad=0)
-        outs['obj_colors'] = pad_tensors(outs['obj_colors'], lens=outs['obj_lens'], pad=0)
-        outs['obj_lens'] = torch.LongTensor(outs['obj_lens'])
-        outs['obj_masks'] = gen_seq_masks(outs['obj_lens'])
+    outs['obj_gt_fts'] = pad_tensors(outs['obj_gt_fts'], lens=outs['obj_lens'])
+    outs['obj_fts'] = pad_tensors(outs['obj_fts'], lens=outs['obj_lens'], pad_ori_data=True)
+    outs['obj_locs'] = pad_tensors(outs['obj_locs'], lens=outs['obj_lens'], pad=0)
+    outs['obj_colors'] = pad_tensors(outs['obj_colors'], lens=outs['obj_lens'], pad=0)
+    outs['obj_lens'] = torch.LongTensor(outs['obj_lens'])
+    outs['obj_masks'] = gen_seq_masks(outs['obj_lens'])
 
-        outs['obj_classes'] = pad_sequence(
-            outs['obj_classes'], batch_first=True, padding_value=-100
-        )
-        outs['tgt_obj_idxs'] = torch.LongTensor(outs['tgt_obj_idxs'])
-        outs['tgt_obj_classes'] = torch.LongTensor(outs['tgt_obj_classes'])
-        return outs
+    outs['obj_classes'] = pad_sequence(
+        outs['obj_classes'], batch_first=True, padding_value=-100
+    )
+    outs['tgt_obj_idxs'] = torch.LongTensor(outs['tgt_obj_idxs'])
+    outs['tgt_obj_classes'] = torch.LongTensor(outs['tgt_obj_classes'])
+    return outs

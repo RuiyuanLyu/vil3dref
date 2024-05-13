@@ -72,7 +72,6 @@ def create_instance_id_mapping(scene, es_anno, overwrite=False):
     with open(out_file_name, "w") as f:
         json.dump(out_list, f)
     return True
-# 检查下scannet数据是从哪里来的
 
 def create_instance_id_loc(scene, es_anno, overwrite=False):
     if es_anno is None:

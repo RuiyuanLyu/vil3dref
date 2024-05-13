@@ -24,20 +24,33 @@ from optim.misc import build_optimizer
 
 from parser import load_parser, parse_with_config
 
-from data.es_dataset import ESDataset, es_collate_fn
+from data.gtlabelpcd_dataset import GTLabelPcdDataset, gtlabelpcd_collate_fn
 
 from model.referit3d_net_mix import ReferIt3DNetMix
 
 
 
 def build_datasets(data_cfg):
-    trn_dataset = ESDataset(
-        es_info_file="embodiedscan_infos/embodiedscan_infos_train_full.pkl",
-        vg_raw_data_file="dataset/VG.json"
+    trn_dataset = GTLabelPcdDataset(
+        data_cfg.trn_scan_split, data_cfg.anno_file, 
+        data_cfg.scan_dir, data_cfg.category_file,
+        cat2vec_file=data_cfg.cat2vec_file, 
+        random_rotate=data_cfg.get('random_rotate', False),
+        max_txt_len=data_cfg.max_txt_len, max_obj_len=data_cfg.max_obj_len,
+        keep_background=data_cfg.get('keep_background', False),
+        num_points=data_cfg.num_points, in_memory=True,
+        gt_scan_dir=data_cfg.get('gt_scan_dir', None),
+        iou_replace_gt=data_cfg.get('iou_replace_gt', 0),
     )
-    val_dataset = ESDataset(
-        es_info_file="embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
-        vg_raw_data_file="dataset/VG.json"
+    val_dataset = GTLabelPcdDataset(
+        data_cfg.val_scan_split, data_cfg.anno_file, 
+        data_cfg.scan_dir, data_cfg.category_file,
+        cat2vec_file=data_cfg.cat2vec_file,
+        max_txt_len=None, max_obj_len=None, random_rotate=False,
+        keep_background=data_cfg.get('keep_background', False),
+        num_points=data_cfg.num_points, in_memory=True,
+        gt_scan_dir=data_cfg.get('gt_scan_dir', None),
+        iou_replace_gt=data_cfg.get('iou_replace_gt', 0),
     )
     return trn_dataset, val_dataset
 
@@ -114,7 +127,7 @@ def main(opts):
     # load data training set
     data_cfg = EasyDict(opts.dataset)
     trn_dataset, val_dataset = build_datasets(data_cfg)
-    collate_fn = es_collate_fn
+    collate_fn = gtlabelpcd_collate_fn
     LOGGER.info('train #scans %d, #data %d' % (len(trn_dataset.scan_ids), len(trn_dataset)))
     LOGGER.info('val #scans %d, #data %d' % (len(val_dataset.scan_ids), len(val_dataset)))
 
@@ -181,6 +194,22 @@ def main(opts):
         if default_gpu:
             batch_iter = tqdm(batch_iter)
         for batch in batch_iter:
+            item_ids = batch['item_ids'] # list ['nr3d_012277', ...], len=64
+            scan_ids = batch['scan_ids'] # list ['scene0520_00', ...], len=64
+            txt_ids = batch['txt_ids'] # torch.int64([64, 28])
+            txt_lens = batch['txt_lens'] # torch.int64([64])
+            obj_gt_fts = batch['obj_gt_fts'] # torch.float32([64, 69, 300])
+            obj_fts = batch['obj_fts'] # torch.float32([64, 69, 1024, 6])
+            obj_locs = batch['obj_locs'] # torch.float32([64, 69, 6])
+            obj_colors = batch['obj_colors'] # torch.float32([64, 69, 3, 4])
+            obj_lens = batch['obj_lens'] # torch.int64([64])
+            obj_classes = batch['obj_classes'] # torch.int64([64, 69])
+            tgt_obj_idxs = batch['tgt_obj_idxs'] # torch.int64([64])
+            tgt_obj_classes = batch['tgt_obj_classes'] # torch.int64([64])
+            obj_ids = batch['obj_ids'] # list[ list['0', '2', '7', ...] ], len=64
+            txt_masks = batch['txt_masks'] # torch.bool([64, 28])
+            obj_masks = batch['obj_masks'] # torch.bool([64, 69])
+            import pdb; pdb.set_trace()
             batch_size = len(batch['scan_ids'])
             result, losses = model(batch, compute_loss=True)
             losses['total'].backward()
