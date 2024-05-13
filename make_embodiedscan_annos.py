@@ -151,14 +151,14 @@ if __name__ == "__main__":
     DATAROOT = eval(f"dataroot_{MODE}")
     scene_list = os.listdir(DATAROOT)[:50]
     embodiedscan_annotation_files = [
-        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_annos/embodiedscan_infos_train_full.pkl",
-        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_annos/embodiedscan_infos_val_full.pkl"
+        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_train_full.pkl",
+        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_val_full.pkl"
     ]
     train_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_train.txt"
     val_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_val.txt"
     anno_train = read_annotation_pickles(embodiedscan_annotation_files[0])
     anno_val = read_annotation_pickles(embodiedscan_annotation_files[1])
-    with open(f"embodiedscan_annos/3rscan_mapping.json", 'r') as f:
+    with open(f"embodiedscan_infos/3rscan_mapping.json", 'r') as f:
         scene_mappings = json.load(f)
     ####################################################################
     # save splits
