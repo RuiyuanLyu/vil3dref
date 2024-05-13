@@ -16,12 +16,12 @@ output_dir = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_dat
 def load_pcd_data(scene):
     pcd_file = os.path.join(DATAROOT, scene, "pc_infos.npy")
     pc_infos = np.load(pcd_file)
-    nan_mask = np.isnan(pc).any(axis=1)
+    nan_mask = np.isnan(pc_infos).any(axis=1)
     pc_infos = pc_infos[~nan_mask]
     pc = pc_infos[:, :3]
     color = pc_infos[:, 3:6]
-    label = pc_infos[:, 7].astype(np.uint16) # this do not matter in the current code
-    # semantic_ids = pc_infos[:, 8].astype(np.uint16)
+    label = pc_infos[:, 6].astype(np.uint16) # this do not matter in the current code
+    # semantic_ids = pc_infos[:, 7].astype(np.uint16)
     return pc, color, label
 
 def create_scene_pcd(scene, es_anno, overwrite=False):
@@ -146,7 +146,7 @@ def create_all(scene, es_anno):
 
 
 if __name__ == "__main__":
-    MODE = "3rscan"
+    MODE = "scannet"
     assert MODE in ["mp3d", "3rscan", "scannet"]
     DATAROOT = eval(f"dataroot_{MODE}")
     scene_list = os.listdir(DATAROOT)[:50]
