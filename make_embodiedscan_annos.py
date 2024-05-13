@@ -29,6 +29,8 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
     if os.path.exists(out_file_name) and not overwrite:
         return True
     pc, color, label = load_pcd_data(scene)
+    if np.isnan(pc).any() or np.isnan(color).any():
+        import pdb; pdb.set_trace()
     instance_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
     bboxes =  es_anno["bboxes"]
     bboxes[:, 3:6] = np.clip(bboxes[:, 3:6], a_min=1e-2, a_max=None)
