@@ -107,7 +107,7 @@ def create_instance_colors(scene, __, overwrite=False):
         colors = colors * 2 - 1
     elif np.all((colors >= 0) & (colors <= 255)):
         colors = colors / 127.5 - 1
-    assert np.all((colors >= -1) & (colors <= 1))
+    assert np.all((colors >= -1) & (colors <= 1)), f"color max {colors.max()}, min {colors.min()}"
 
     clustered_colors = []
     instance_ids = sorted(list(set(instance_labels)))
@@ -142,13 +142,8 @@ def create_all(scene, es_anno):
 
 if __name__ == "__main__":
     MODE = "3rscan"
-    if MODE == "mp3d":
-        DATAROOT = dataroot_mp3d
-    elif MODE == "3rscan":
-        DATAROOT = dataroot_3rscan
-    elif MODE == "scannet":
-        DATAROOT = dataroot_scannet
-
+    assert MODE in ["mp3d", "3rscan", "scannet"]
+    DATAROOT = eval(f"dataroot_{MODE}")
     scene_list = os.listdir(DATAROOT)[:50]
     embodiedscan_annotation_files = [
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_annos/embodiedscan_infos_train_full.pkl",
