@@ -240,6 +240,7 @@ def read_annotation_pickle(path, show_progress=True):
         instances = datalist[scene_idx]["instances"]
         bboxes = []
         object_ids = []
+        object_type_int = []
         object_types = []
         for object_idx in range(len(instances)):
             bbox_3d = instances[object_idx]["bbox_3d"]  # list of 9 values
@@ -249,6 +250,7 @@ def read_annotation_pickle(path, show_progress=True):
             # if object_type in EXCLUDED_OBJECTS:
             #     continue
             object_types.append(object_type)
+            object_type_int.append(bbox_label_3d)
             bboxes.append(bbox_3d)
             object_ids.append(bbox_id)
         bboxes = np.array(bboxes)
@@ -285,6 +287,7 @@ def read_annotation_pickle(path, show_progress=True):
         output_data[scene_id] = {
             "bboxes": bboxes,
             "object_ids": object_ids,
+            "object_type_ints": object_type_int,
             "object_types": object_types,
             "visible_view_object_dict": visible_view_object_dict,
             "extrinsics_c2w": extrinsics_c2w,
