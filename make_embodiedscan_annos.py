@@ -1,0 +1,179 @@
+import os
+import numpy as np
+import torch
+import mmengine
+import json
+from utils.utils_read import read_annotation_pickles
+from utils.utils_3d import is_inside_box, euler_angles_to_matrix
+from utils.decorators import mmengine_track_func
+
+dataroot_mp3d = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/matterport3d/scans"
+dataroot_3rscan = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/3rscan/scans"
+output_dir = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_data_new"
+
+
+def load_pcd_data(scene):
+    pcd_file = os.path.join(DATAROOT, scene, "pc_infos.npy")
+    pc_infos = np.load(pcd_file)
+    pc = pc_infos[:, :3]
+    color = pc_infos[:, 3:6]
+    label = pc_infos[:, 7].astype(np.uint16) # this do not matter in the current code
+    # semantic_ids = pc_infos[:, 8].astype(np.uint16)
+    return pc, color, label
+
+def create_scene_pcd(scene, es_anno, overwrite=False):
+    if es_anno is None:
+        return None
+    out_file_name = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
+    if os.path.exists(out_file_name) and not overwrite:
+        return True
+    pc, color, label = load_pcd_data(scene)
+    semantic_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
+    bboxes =  es_anno["bboxes"]
+    object_ids = es_anno["object_ids"]
+    object_types = es_anno["object_types"] # str
+    sorted_indices = sorted(enumerate(bboxes), key=lambda x: -np.prod(x[1][3:6])) # the larger the box, the smaller the index
+    sorted_indices_list = [index for index, value in sorted_indices]
+
+    bboxes = [bboxes[index] for index in sorted_indices_list]
+    object_ids = [object_ids[index] for index in sorted_indices_list]
+    object_types = [object_types[index] for index in sorted_indices_list]
+
+    for box, obj_id, obj_type in zip(bboxes, object_ids, object_types):
+        center, size, euler = box[:3], box[3:6], box[6:]
+        R = euler_angles_to_matrix(euler, convention="ZXY")
+        R = R.reshape((3,3))
+        box_pc_indices = is_inside_box(pc, center, size, R)
+        semantic_ids[box_pc_indices] = obj_id
+    out_data = (pc, color, label, semantic_ids)
+    os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
+    torch.save(out_data, out_file_name)
+    return True
+
+def create_instance_id_mapping(scene, es_anno, overwrite=False):
+    if es_anno is None:
+        return None
+    out_file_name = os.path.join(output_dir,"instance_id_to_name", f"{scene}.json")
+    if os.path.exists(out_file_name) and not overwrite:
+        return True
+    object_ids = es_anno["object_ids"]
+    object_types = es_anno["object_types"] # str
+    out_list = []
+    if len(object_ids) > 0:
+        max_id = np.max(object_ids)
+        out_list = ["placeholder"] * (max_id+1)
+        for obj_id, obj_type in zip(object_ids, object_types):
+            out_list[obj_id] = obj_type
+    os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
+    with open(out_file_name, "w") as f:
+        json.dump(out_list, f)
+    return True
+
+def create_instance_id_loc(scene, es_anno, overwrite=False):
+    if es_anno is None:
+        return None
+    out_file_name = os.path.join(output_dir,"instance_id_to_loc", f"{scene}.npy")
+    if os.path.exists(out_file_name) and not overwrite:
+        return True
+    object_bboxes = es_anno["bboxes"] # 9 dof np array
+    object_ids = es_anno["object_ids"]
+    out_array = np.zeros((0, 9))
+    if len(object_ids) > 0:
+        max_id = np.max(object_ids)
+        out_array = np.zeros((max_id+1, 9))
+        for obj_id, bbox in zip(object_ids, object_bboxes):
+            out_array[obj_id] = bbox
+    os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
+    np.save(out_file_name, out_array)
+    return True
+
+from sklearn.mixture import GaussianMixture
+
+def create_instance_colors(scene, _, overwrite=False):
+    # copied from preprocess/scannetv2/precompute_instance_colors.py
+    out_file_name = os.path.join(output_dir, 'instance_id_to_gmm_color', '%s.json'%scene)
+    if os.path.exists(out_file_name) and not overwrite:
+        return
+
+    scan_file = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
+    data = torch.load(scan_file) # xyz, rgb, semantic_labels, instance_labels
+    colors = data[1]
+    instance_labels = data[3]
+
+    if instance_labels is None:
+        return
+
+    # normalize
+    colors = colors / 127.5 - 1 
+    
+    clustered_colors = []
+    for i in range(instance_labels.max() + 1):
+        mask = instance_labels == i     # time consuming
+        obj_colors = colors[mask]
+        if len(obj_colors) < 10:
+            clustered_colors.append({
+                'weights': [0.0,0.0,0.0],
+                'means': [0.0,0.0,0.0],
+            })
+            continue
+        gm = GaussianMixture(n_components=3, covariance_type='full', random_state=0).fit(obj_colors)
+        clustered_colors.append({
+            'weights': gm.weights_.tolist(),
+            'means': gm.means_.tolist(),
+        })
+    os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
+    json.dump(
+        clustered_colors,
+        open(out_file_name, 'w')
+    )
+
+@mmengine_track_func
+def create_all(scene, es_anno):
+    create_scene_pcd(scene, es_anno, overwrite=False)
+    create_instance_colors(scene, es_anno, overwrite=False)
+    create_instance_id_mapping(scene, es_anno, overwrite=False)
+    create_instance_id_loc(scene, es_anno, overwrite=False)
+
+
+if __name__ == "__main__":
+    MODE = "3rscan"
+    if MODE == "mp3d":
+        DATAROOT = dataroot_mp3d
+    elif MODE == "3rscan":
+        DATAROOT = dataroot_3rscan
+
+    scene_list = os.listdir(DATAROOT)[:50]
+    embodiedscan_annotation_files = [
+        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_annos/embodiedscan_infos_train_full.pkl",
+        "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_annos/embodiedscan_infos_val_full.pkl"
+    ]
+    train_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_train.txt"
+    val_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_val.txt"
+    anno_train = read_annotation_pickles(embodiedscan_annotation_files[0])
+    anno_val = read_annotation_pickles(embodiedscan_annotation_files[1])
+    with open(f"embodiedscan_annos/3rscan_mapping.json", 'r') as f:
+        scene_mappings = json.load(f)
+    ####################################################################
+    # save splits
+    mini_scenes = set(os.listdir(dataroot_mp3d)[:50] + os.listdir(dataroot_3rscan)[:50])
+    reverse_mapping = {v:k for k,v in scene_mappings.items()}
+    with open(train_split_file, 'w') as f:
+        for key in anno_train:
+            key = reverse_mapping.get(key, key)
+            if key in mini_scenes:
+                f.write(key + '\n')
+    with open(val_split_file, 'w') as f:
+        for key in anno_val:
+            key = reverse_mapping.get(key, key)
+            if key in mini_scenes:
+                f.write(key + '\n')
+    ####################################################################
+    # out start here
+    es_annos = {**anno_train, **anno_val}
+    tasks = []
+    for scene in scene_list:
+        # only 3rscan needs mapping. mp3d do not.
+        es_anno = es_annos.get(scene_mappings.get(scene, scene), None)
+        if es_anno:
+            tasks.append((scene, es_anno))
+    mmengine.track_parallel_progress(create_all, tasks, nproc=8)

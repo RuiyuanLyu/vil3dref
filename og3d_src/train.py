@@ -210,6 +210,20 @@ def main(opts):
         if default_gpu:
             batch_iter = tqdm(batch_iter)
         for batch in batch_iter:
+            item_ids = batch['item_ids'] # list ['nr3d_012277', ...], len=128
+            scan_ids = batch['scan_ids'] # list ['scene0520_00', ...], len=128
+            txt_ids = batch['txt_ids'] # torch.int64([128, 28])
+            txt_lens = batch['txt_lens'] # torch.int64([128])
+            obj_fts = batch['obj_fts'] # torch.float32([128, 69, 1024, 6])
+            obj_locs = batch['obj_locs'] # torch.float32([128, 69, 6])
+            obj_colors = batch['obj_colors'] # torch.float32([128, 69, 3, 4])
+            obj_lens = batch['obj_lens'] # torch.int64([128])
+            obj_classes = batch['obj_classes'] # torch.int64([128, 69])
+            tgt_obj_idxs = batch['tgt_obj_idxs'] # torch.int64([128])
+            tgt_obj_classes = batch['tgt_obj_classes'] # torch.int64([128])
+            obj_ids = batch['obj_ids'] # list[ list['0', '2', '7', ...] ], len=128
+            txt_masks = batch['txt_masks'] # torch.bool([128, 28])
+            obj_masks = batch['obj_masks'] # torch.bool([128, 69])
             batch_size = len(batch['scan_ids'])
             result, losses = model(batch, compute_loss=True)
             losses['total'].backward()

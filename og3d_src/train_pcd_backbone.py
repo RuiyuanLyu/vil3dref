@@ -246,6 +246,9 @@ def main(opts):
     for epoch in tqdm(range(opts.num_epoch)):
         start_time = time.time()
         for batch in tqdm(trn_dataloader):
+            import pdb; pdb.set_trace()
+            obj_pcds = batch['obj_pcds'] # torch.float32([16, 1024, 6])
+            obj_labels = batch['obj_labels'] # torch.int64([16, 1024, 6])
             for bk, bv in batch.items():
                 batch[bk] = bv.to(device)
             batch_size = len(batch['obj_pcds'])
