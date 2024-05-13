@@ -16,6 +16,7 @@ logs/
 /og3d_src/model/external_tools/pointnet2/dist
 
 downloads/
+glove.42B.300d*
 
 embodiedscan_infos
 embodiedscan_data
