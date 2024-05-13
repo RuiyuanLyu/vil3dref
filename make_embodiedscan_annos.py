@@ -16,6 +16,8 @@ output_dir = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_dat
 def load_pcd_data(scene):
     pcd_file = os.path.join(DATAROOT, scene, "pc_infos.npy")
     pc_infos = np.load(pcd_file)
+    nan_mask = np.isnan(pc).any(axis=1)
+    pc_infos = pc_infos[~nan_mask]
     pc = pc_infos[:, :3]
     color = pc_infos[:, 3:6]
     label = pc_infos[:, 7].astype(np.uint16) # this do not matter in the current code
