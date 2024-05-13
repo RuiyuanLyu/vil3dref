@@ -141,7 +141,7 @@ def create_all(scene, es_anno):
 
 
 if __name__ == "__main__":
-    MODE = "mp3d"
+    MODE = "3rscan"
     if MODE == "mp3d":
         DATAROOT = dataroot_mp3d
     elif MODE == "3rscan":
@@ -162,7 +162,7 @@ if __name__ == "__main__":
         scene_mappings = json.load(f)
     ####################################################################
     # save splits
-    mini_scenes = set(os.listdir(dataroot_mp3d)[:50] + os.listdir(dataroot_3rscan)[:50] + os.listdir(dataroot_scannet))[:50]
+    mini_scenes = set(os.listdir(dataroot_mp3d)[:50] + os.listdir(dataroot_3rscan)[:50] + os.listdir(dataroot_scannet)[:50])
     reverse_mapping = {v:k for k,v in scene_mappings.items()}
     with open(train_split_file, 'w') as f:
         for key in anno_train:
