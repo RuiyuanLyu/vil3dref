@@ -42,7 +42,7 @@ class ESDataset(Dataset):
         self.word2vec = json.load(open(cat2vec_file, 'r'))
         self.word2vec_vocab = list(self.word2vec.keys())
         self.es_info = read_annotation_pickles(es_info_file)
-        self.object_type_to_int = np.load(es_info_file)["metainfo"]["categories"]
+        self.type2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
         # self.es_info[scene_id] = {
         #     "bboxes": bboxes,
         #     "object_ids": object_ids,
@@ -79,7 +79,8 @@ class ESDataset(Dataset):
                 print(e)
                 print(item)
                 continue
-            tgt_obj_class = self.object_type_to_int(item['target'][0])
+            tgt_type = item['target']
+            tgt_obj_class = self.type2int[tgt_type[0] if isinstance(tgt_type, list) else tgt_type]
             vg_item = {
                 "item_id": item_id,
                 "scan_id": scan_id,
@@ -127,6 +128,7 @@ class ESDataset(Dataset):
             [np.array(x['weights'])[:, None], np.array(x['means'])],
             axis=1
         ).astype(np.float32) for x in inst_colors]
+        inst_colors = np.array(inst_colors)
         return inst_colors
 
     def get_scan_gt_pcd_data(self, scan_id):
@@ -162,6 +164,7 @@ class ESDataset(Dataset):
             else:
                 obj_pcd = np.zeros((self.num_points, 6))
             obj_fts.append(obj_pcd)
+        obj_fts = np.array(obj_fts)
         return obj_fts
 
     def __len__(self):

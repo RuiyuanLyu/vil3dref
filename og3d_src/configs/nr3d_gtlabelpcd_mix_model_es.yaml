@@ -25,7 +25,7 @@ val_every_epoch: 1
 model:
   hidden_size: 768
   dropout: 0.3
-  num_obj_classes: 607
+  num_obj_classes: 288
   teacher_eval_mode: false
   obj_encoder:
     # student
@@ -37,12 +37,12 @@ model:
     dropout: 0.1
     freeze: true
     freeze_bn: true
-    dim_loc: 6
+    dim_loc: 9
     student_use_color_enc: false
     # teacher
     onehot_ft: false
     dim_ft: 300
-    dim_loc: 6  # 6, 10 (xyz,lwh,rot:2)
+    dim_loc: 9  # 6, 10 (xyz,lwh,rot:2)
     teacher_use_color_enc: true
   txt_encoder:
     type: bert

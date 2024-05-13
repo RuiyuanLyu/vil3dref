@@ -49,8 +49,11 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
         center, size, euler = box[:3], box[3:6], box[6:]
         R = euler_angles_to_matrix(euler, convention="ZXY")
         R = R.reshape((3,3))
-        box_pc_indices = is_inside_box(pc, center, size, R)
-        instance_ids[box_pc_indices] = obj_id
+        box_pc_mask = is_inside_box(pc, center, size, R)
+        num_points_in_box = np.sum(box_pc_mask)
+        # if num_points_in_box == 0:
+        #     print(f"do not contain points: {obj_type}, {obj_id}")
+        instance_ids[box_pc_mask] = obj_id
     out_data = (pc, color, label, instance_ids)
     os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
     torch.save(out_data, out_file_name)
@@ -92,7 +95,7 @@ def create_instance_id_loc(scene, es_anno, overwrite=False):
 
 from sklearn.mixture import GaussianMixture
 
-def create_instance_colors(scene, __, overwrite=False):
+def create_instance_colors(scene, es_anno, overwrite=False):
     # copied from preprocess/scannetv2/precompute_instance_colors.py
     out_file_name = os.path.join(output_dir, 'instance_id_to_gmm_color', '%s.json'%scene)
     if os.path.exists(out_file_name) and not overwrite:
@@ -101,8 +104,6 @@ def create_instance_colors(scene, __, overwrite=False):
     scan_file = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
     data = torch.load(scan_file) # xyz, rgb, obj_type, instance_labels
     _, colors, _, instance_labels = data
-    if instance_labels is None:
-        return
 
     # normalize
     # color might be [0, 255], or [0, 1], or [-1, 1]. need to normalize to [-1, 1]
@@ -114,7 +115,7 @@ def create_instance_colors(scene, __, overwrite=False):
         print(f"color max {colors.max()}, min {colors.min()}")
 
     clustered_colors = []
-    instance_ids = sorted(list(set(instance_labels)))
+    instance_ids = es_anno["object_ids"]
     instance_ids = [x for x in instance_ids if x >= 0]
     for i in instance_ids:
         mask = instance_labels == i     # time consuming

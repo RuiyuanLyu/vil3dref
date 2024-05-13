@@ -34,13 +34,13 @@ def build_datasets(data_cfg):
     trn_dataset = ESDataset(
         es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl",
         vg_raw_data_file="../datasets/VG.json",
-        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2glove42b.json',
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
         processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     val_dataset = ESDataset(
         es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
         vg_raw_data_file="../datasets/VG.json",
-        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2glove42b.json',
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
         processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     return trn_dataset, val_dataset
@@ -101,15 +101,16 @@ def main(opts):
             len([n for n in checkpoint.keys() if n in model.student_model.state_dict()]),
         )
         
-        model.teacher_model.load_state_dict(checkpoint, strict=False)
-        if opts.resume_student:
-            model.student_model.load_state_dict(checkpoint, strict=False)
-        else:
-            student_checkpoint = torch.load(
-                opts.resume_files[0], map_location=lambda storage, loc: storage
-            )
-            print('resume_student', len(student_checkpoint))
-            model.student_model.load_state_dict(student_checkpoint, strict=False)
+        # TODO: the current state dict do not match due to 9 dof feature.        
+        # model.teacher_model.load_state_dict(checkpoint, strict=False)
+        # if opts.resume_student:
+        #     model.student_model.load_state_dict(checkpoint, strict=False)
+        # else:
+        #     student_checkpoint = torch.load(
+        #         opts.resume_files[0], map_location=lambda storage, loc: storage
+        #     )
+        #     print('resume_student', len(student_checkpoint))
+        #     model.student_model.load_state_dict(student_checkpoint, strict=False)
 
 
     model_cfg = model.config
