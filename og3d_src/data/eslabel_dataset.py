@@ -22,7 +22,6 @@ except:
 # scan_ids = batch['scan_ids'] # list ['scene0520_00', ...], len=64
 # txt_ids = batch['txt_ids'] # torch.int64([64, 28])
 # txt_lens = batch['txt_lens'] # torch.int64([64])
-# obj_gt_fts = batch['obj_gt_fts'] # torch.float32([64, 69, 300])
 # obj_fts = batch['obj_fts'] # torch.float32([64, 69, 1024, 6])
 # obj_locs = batch['obj_locs'] # torch.float32([64, 69, 6])
 # obj_colors = batch['obj_colors'] # torch.float32([64, 69, 3, 4])
@@ -34,7 +33,7 @@ except:
 # txt_masks = batch['txt_masks'] # torch.bool([64, 28])
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
 
-class ESLabelPcdDataset(Dataset):
+class ESLabelDataset(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
         # from data.glove_embedding import get_glove_word2vec
@@ -109,14 +108,14 @@ class ESLabelPcdDataset(Dataset):
         # NOTE: the object id is not compact. Do not use this obj_id to look up for es annos
         obj_classes = self.es_info[scan_id]['object_type_ints'] 
         obj_labels = self.es_info[scan_id]['object_types']
-        obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
+        # obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
         obj_locs = self.es_info[scan_id]['bboxes']
         obj_colors = self.get_inst_colors(scan_id)
         scan_pcd, obj_pcds = self.get_scan_gt_pcd_data(scan_id)
         obj_fts = self.get_obj_fts(obj_pcds)
         obj_item = {
             "obj_ids": obj_ids,
-            "obj_gt_fts": obj_gt_fts,
+            # "obj_gt_fts": obj_gt_fts,
             "obj_fts": obj_fts,
             "obj_locs": obj_locs,
             "obj_colors": obj_colors,
@@ -182,7 +181,7 @@ class ESLabelPcdDataset(Dataset):
         scan_ids = item["scan_id"] # str
         txt_ids = torch.LongTensor(item["txt_ids"])  # torch.int64 ([max_len_txt])
         txt_lens = torch.LongTensor([item["txt_len"]])  # torch.int64 ([])
-        obj_gt_fts = torch.FloatTensor(obj_item["obj_gt_fts"])  # torch.float32 ([max_num_obj, 300])
+        # obj_gt_fts = torch.FloatTensor(obj_item["obj_gt_fts"])  # torch.float32 ([max_num_obj, 300])
         obj_fts = torch.FloatTensor(obj_item["obj_fts"])  # torch.float32 ([max_num_obj, 1024, 6])
         obj_locs = torch.FloatTensor(obj_item["obj_locs"])  # torch.float32 ([max_num_obj, 6/9])
         obj_colors = torch.FloatTensor(obj_item["obj_colors"])  # torch.float32 ([max_num_obj, 3, 4])
@@ -198,7 +197,6 @@ class ESLabelPcdDataset(Dataset):
             "scan_ids": scan_ids,
             "txt_ids": txt_ids,
             "txt_lens": txt_lens,
-            "obj_gt_fts": obj_gt_fts,
             "obj_fts": obj_fts,
             "obj_locs": obj_locs,
             "obj_colors": obj_colors,
@@ -210,7 +208,7 @@ class ESLabelPcdDataset(Dataset):
         }
         return outs
 
-def eslabelpcd_collate_fn(data):
+def eslabel_collate_fn(data):
     # input: list of dicts, each dict is the output of __getitem__
     outs = {}
     for key in data[0].keys():
@@ -219,8 +217,11 @@ def eslabelpcd_collate_fn(data):
     outs['txt_lens'] = torch.LongTensor(outs['txt_lens'])
     outs['txt_masks'] = gen_seq_masks(outs['txt_lens'])
 
-    outs['obj_gt_fts'] = pad_tensors(outs['obj_gt_fts'], lens=outs['obj_lens'])
-    outs['obj_fts'] = pad_tensors(outs['obj_fts'], lens=outs['obj_lens'], pad_ori_data=True)
+    # outs['obj_gt_fts'] = pad_tensors(outs['obj_gt_fts'], lens=outs['obj_lens'])
+    if len(outs['obj_fts'][0].size()) == 1:
+        outs['obj_fts'] = pad_sequence(outs['obj_fts'], batch_first=True)
+    else:
+        outs['obj_fts'] = pad_tensors(outs['obj_fts'], lens=outs['obj_lens'])
     outs['obj_locs'] = pad_tensors(outs['obj_locs'], lens=outs['obj_lens'], pad=0)
     outs['obj_colors'] = pad_tensors(outs['obj_colors'], lens=outs['obj_lens'], pad=0)
     outs['obj_lens'] = torch.LongTensor(outs['obj_lens'])

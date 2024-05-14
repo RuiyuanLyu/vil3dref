@@ -34,7 +34,7 @@ except:
 # txt_masks = batch['txt_masks'] # torch.bool([64, 28])
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
 
-class ESLabelPcdDataset(Dataset):
+class ESPcdDataset(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
         # from data.glove_embedding import get_glove_word2vec
@@ -198,7 +198,6 @@ class ESLabelPcdDataset(Dataset):
             "scan_ids": scan_ids,
             "txt_ids": txt_ids,
             "txt_lens": txt_lens,
-            "obj_gt_fts": obj_gt_fts,
             "obj_fts": obj_fts,
             "obj_locs": obj_locs,
             "obj_colors": obj_colors,
@@ -210,7 +209,7 @@ class ESLabelPcdDataset(Dataset):
         }
         return outs
 
-def eslabelpcd_collate_fn(data):
+def espcd_collate_fn(data):
     # input: list of dicts, each dict is the output of __getitem__
     outs = {}
     for key in data[0].keys():
@@ -219,7 +218,6 @@ def eslabelpcd_collate_fn(data):
     outs['txt_lens'] = torch.LongTensor(outs['txt_lens'])
     outs['txt_masks'] = gen_seq_masks(outs['txt_lens'])
 
-    outs['obj_gt_fts'] = pad_tensors(outs['obj_gt_fts'], lens=outs['obj_lens'])
     outs['obj_fts'] = pad_tensors(outs['obj_fts'], lens=outs['obj_lens'], pad_ori_data=True)
     outs['obj_locs'] = pad_tensors(outs['obj_locs'], lens=outs['obj_lens'], pad=0)
     outs['obj_colors'] = pad_tensors(outs['obj_colors'], lens=outs['obj_lens'], pad=0)

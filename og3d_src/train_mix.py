@@ -24,7 +24,7 @@ from optim.misc import build_optimizer
 
 from parser import load_parser, parse_with_config
 
-from data.eslabelpcd_dataset import ESLabelPcdDataset, es_collate_fn
+from data.eslabelpcd_dataset import ESLabelPcdDataset, eslabelpcd_collate_fn
 
 from model.referit3d_net_mix import ReferIt3DNetMix
 
