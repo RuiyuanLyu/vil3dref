@@ -79,19 +79,22 @@ class PcdDataset(Dataset):
 
         self.data = []
         for scan_id in self.scan_ids:
-            pcds, colors, _, instance_labels = torch.load(
-                os.path.join(self.scan_dir, 'pcd_with_global_alignment', '%s.pth'%scan_id)
-            )
+            pcd_path = os.path.join(self.scan_dir, 'pcd_with_global_alignment', '%s.pth'%scan_id)
+            if not os.path.exists(pcd_path):
+                continue
+            pcds, colors, _, instance_labels = torch.load(pcd_path)
             # obj_labels = json.load(open(
             #     os.path.join(self.scan_dir, 'instance_id_to_name', '%s.json'%scan_id)
             # ))
             # for i, obj_label in enumerate(obj_labels):
-            obj_ids, obj_types = self.es_info[scan_id]["obj_ids"], self.es_info[scan_id]["obj_types"]
+            obj_ids, obj_types = self.es_info[scan_id]["object_ids"], self.es_info[scan_id]["object_types"]
             for obj_id, obj_label in zip(obj_ids, obj_types):
                 if (not self.keep_background) and obj_label in ['wall', 'floor', 'ceiling']:
                     continue
                 mask = instance_labels == int(obj_id) 
-                assert np.sum(mask) > 0, 'scan: %s, obj %d' %(scan_id, i)
+                if np.sum(mask) == 0:
+                    print('scan: %s, obj %d' %(scan_id, obj_id))
+                    continue
                 obj_pcd = pcds[mask]
                 obj_color = colors[mask]
                 # normalize
@@ -268,7 +271,6 @@ def main(opts):
     for epoch in tqdm(range(opts.num_epoch)):
         start_time = time.time()
         for batch in tqdm(trn_dataloader):
-            import pdb; pdb.set_trace()
             obj_pcds = batch['obj_pcds'] # torch.float32([16, 1024, 6])
             obj_labels = batch['obj_labels'] # torch.int64([16, 1024, 6])
             for bk, bv in batch.items():
