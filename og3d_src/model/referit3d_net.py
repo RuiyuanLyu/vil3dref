@@ -167,7 +167,12 @@ class ReferIt3DNet(nn.Module):
     def compute_loss(self, result, batch):
         losses = {}
         total_loss = 0
-        
+        # print(result['og3d_logits'])
+        # print(result['og3d_logits'].shape)
+        # print(batch['tgt_obj_idxs'])
+        # print(batch['tgt_obj_idxs'].shape)
+        # Assertion `t >= 0 && t < n_classes` failed.  adjust max_obj_len in config
+
         og3d_loss = F.cross_entropy(result['og3d_logits'], batch['tgt_obj_idxs'])
         losses['og3d'] = og3d_loss
         total_loss += og3d_loss

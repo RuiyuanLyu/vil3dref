@@ -80,7 +80,7 @@ dataset:
 
   num_points: 1024
   max_txt_len: 50
-  max_obj_len: 80
+  max_obj_len: 200
   keep_background: false
   random_rotate: true
 

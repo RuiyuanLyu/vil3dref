@@ -69,12 +69,14 @@ class ESDataset(Dataset):
         for i, item in enumerate(self.vg_raw_data):
             item_id = f"esvg_{i}"
             scan_id = item['scan_id']
+            obj_id_list = [int(x) for x in self.es_info[scan_id]['object_ids']] 
             txt = item['text']
             txt_ids = self.tokenizer.encode(txt) 
             txt_len = len(txt_ids)
             try:
                 tgt_obj_idx = item['target_id']
                 tgt_obj_idx = int(tgt_obj_idx[0]) if isinstance(tgt_obj_idx, list) else tgt_obj_idx
+                tgt_obj_idx = obj_id_list.index(tgt_obj_idx)
             except Exception as e:
                 print(e)
                 print(item)
@@ -93,7 +95,7 @@ class ESDataset(Dataset):
         del self.vg_raw_data
 
     def do_word2vec(self, text):
-        # TODO: solve for ood vocab.
+        # for ood vocab (multiword): take average.
         if text in self.word2vec:
             return self.word2vec[text]
         else:
@@ -101,7 +103,10 @@ class ESDataset(Dataset):
             return self.word2vec[key]
 
     def get_obj_inputs(self, scan_id):
-        obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']]
+        # obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']] 
+        obj_ids = [str(x) for x in range(len(self.es_info[scan_id]['object_ids']))]
+        # print(obj_ids)
+        # NOTE: the object id is not compact. Do not use this obj_id to look up for es annos
         obj_classes = self.es_info[scan_id]['object_type_ints'] 
         obj_labels = self.es_info[scan_id]['object_types']
         obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
