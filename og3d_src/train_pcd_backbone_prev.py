@@ -20,7 +20,6 @@ from utils.logger import LOGGER, TB_LOGGER, AverageMeter, RunningMeter, add_log_
 from utils.save import ModelSaver, save_training_meta
 from utils.misc import NoOp, set_random_seed, set_cuda, wrap_model
 from utils.distributed import all_gather
-from utils.utils_read import read_annotation_pickles
 
 from optim import get_lr_sched
 from optim.misc import build_optimizer
@@ -47,50 +46,42 @@ class PcdClassifier(nn.Module):
 
 
 class PcdDataset(Dataset):
-    # def __init__(
-    #     self, scan_id_file, scan_dir, category_file, num_points=1024,
-    #     cat2vec_file=None, keep_background=False, random_rotate=False,
-    #     og3d_subset_file=None, with_rgb=True,
-    # ):
-    def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
-        super().__init__()
-        self.es_info = read_annotation_pickles(es_info_file)
+    def __init__(
+        self, scan_id_file, scan_dir, category_file, num_points=1024,
+        cat2vec_file=None, keep_background=False, random_rotate=False,
+        og3d_subset_file=None, with_rgb=True,
+    ):
+        scan_ids = [x.strip() for x in open(scan_id_file, 'r')]
 
-        scan_ids = list(self.es_info.keys())
-
-        # if og3d_subset_file is not None:
-        #     og3d_scanids = set()
-        #     with jsonlines.open(og3d_subset_file, 'r') as f:
-        #         for item in f:
-        #             og3d_scanids.add(item['scan_id'])
-        #     scan_ids = [scan_id for scan_id in scan_ids if scan_id in og3d_scanids]
+        if og3d_subset_file is not None:
+            og3d_scanids = set()
+            with jsonlines.open(og3d_subset_file, 'r') as f:
+                for item in f:
+                    og3d_scanids.add(item['scan_id'])
+            scan_ids = [scan_id for scan_id in scan_ids if scan_id in og3d_scanids]
 
         self.scan_ids = scan_ids
-        self.scan_dir = processed_scan_dir
-        self.keep_background = False
-        self.random_rotate = False
-        self.num_points = 1024
-        self.with_rgb = True
+        self.scan_dir = scan_dir
+        self.keep_background = keep_background
+        self.random_rotate = random_rotate
+        self.num_points = num_points
+        self.with_rgb = with_rgb
 
-        # self.int2cat = json.load(open(category_file, 'r'))
-        # self.cat2int = {w: i for i, w in enumerate(self.int2cat)}
-        self.cat2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
-        self.int2cat = {v:k for k,v in self.cat2int.items()}
+        self.int2cat = json.load(open(category_file, 'r'))
+        self.cat2int = {w: i for i, w in enumerate(self.int2cat)}
 
         self.data = []
         for scan_id in self.scan_ids:
             pcds, colors, _, instance_labels = torch.load(
                 os.path.join(self.scan_dir, 'pcd_with_global_alignment', '%s.pth'%scan_id)
             )
-            # obj_labels = json.load(open(
-            #     os.path.join(self.scan_dir, 'instance_id_to_name', '%s.json'%scan_id)
-            # ))
-            # for i, obj_label in enumerate(obj_labels):
-            obj_ids, obj_types = self.es_info[scan_id]["obj_ids"], self.es_info[scan_id]["obj_types"]
-            for obj_id, obj_label in zip(obj_ids, obj_types):
+            obj_labels = json.load(open(
+                os.path.join(self.scan_dir, 'instance_id_to_name', '%s.json'%scan_id)
+            ))
+            for i, obj_label in enumerate(obj_labels):
                 if (not self.keep_background) and obj_label in ['wall', 'floor', 'ceiling']:
                     continue
-                mask = instance_labels == int(obj_id) 
+                mask = instance_labels == i 
                 assert np.sum(mask) > 0, 'scan: %s, obj %d' %(scan_id, i)
                 obj_pcd = pcds[mask]
                 obj_color = colors[mask]
@@ -198,35 +189,22 @@ def main(opts):
 
     # load data training set
     data_cfg = EasyDict(opts.dataset)
-    # trn_dataset = PcdDataset(
-    #     data_cfg.trn_scan_split, data_cfg.scan_dir, data_cfg.category_file,
-    #     num_points=data_cfg.num_points, 
-    #     random_rotate=data_cfg.random_rotate if not opts.test else False,
-    #     keep_background=data_cfg.keep_background,
-    #     og3d_subset_file=data_cfg.og3d_subset_file,
-    #     with_rgb=data_cfg.with_rgb,
-    # )
-    # val_dataset = PcdDataset(
-    #     data_cfg.val_scan_split, data_cfg.scan_dir, data_cfg.category_file,
-    #     random_rotate=False, 
-    #     num_points=data_cfg.num_points,
-    #     keep_background=data_cfg.keep_background,
-    #     og3d_subset_file=data_cfg.og3d_subset_file,
-    #     with_rgb=data_cfg.with_rgb,
-    # )
     trn_dataset = PcdDataset(
-        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl",
-        vg_raw_data_file="../datasets/VG.json",
-        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
-        processed_scan_dir="../datasets/referit3d/scan_data_new"
+        data_cfg.trn_scan_split, data_cfg.scan_dir, data_cfg.category_file,
+        num_points=data_cfg.num_points, 
+        random_rotate=data_cfg.random_rotate if not opts.test else False,
+        keep_background=data_cfg.keep_background,
+        og3d_subset_file=data_cfg.og3d_subset_file,
+        with_rgb=data_cfg.with_rgb,
     )
     val_dataset = PcdDataset(
-        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
-        vg_raw_data_file="../datasets/VG.json",
-        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
-        processed_scan_dir="../datasets/referit3d/scan_data_new"
+        data_cfg.val_scan_split, data_cfg.scan_dir, data_cfg.category_file,
+        random_rotate=False, 
+        num_points=data_cfg.num_points,
+        keep_background=data_cfg.keep_background,
+        og3d_subset_file=data_cfg.og3d_subset_file,
+        with_rgb=data_cfg.with_rgb,
     )
-
     LOGGER.info('train #scans %d, #data %d' % (len(trn_dataset.scan_ids), len(trn_dataset)))
     LOGGER.info('val #scans %d, #data %d' % (len(val_dataset.scan_ids), len(val_dataset)))
 
