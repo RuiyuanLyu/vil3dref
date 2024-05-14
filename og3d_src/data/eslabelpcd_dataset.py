@@ -34,7 +34,7 @@ except:
 # txt_masks = batch['txt_masks'] # torch.bool([64, 28])
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
 
-class ESDataset(Dataset):
+class ESLabelPcdDataset(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
         # from data.glove_embedding import get_glove_word2vec

@@ -24,20 +24,20 @@ from optim.misc import build_optimizer
 
 from parser import load_parser, parse_with_config
 
-from data.es_dataset import ESDataset, es_collate_fn
+from data.eslabelpcd_dataset import ESLabelPcdDataset, es_collate_fn
 
 from model.referit3d_net_mix import ReferIt3DNetMix
 
 
 
 def build_datasets(data_cfg):
-    trn_dataset = ESDataset(
+    trn_dataset = ESLabelPcdDataset(
         es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl",
         vg_raw_data_file="../datasets/VG.json",
         cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
         processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
-    val_dataset = ESDataset(
+    val_dataset = ESLabelPcdDataset(
         es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
         vg_raw_data_file="../datasets/VG.json",
         cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
