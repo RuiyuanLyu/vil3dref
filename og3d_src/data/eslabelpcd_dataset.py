@@ -62,6 +62,7 @@ class ESLabelPcdDataset(Dataset):
         # 需要维护两份数据，一份是关于bbox和pcd的，一份是关于vg txt的
         # vg txt的一个dict的例子：{'scan_id': 'scene0000_00', 'target_id': ['30'], 'distractor_ids': [], 'text': 'The X is used for sitting at the table.Please find the X.', 'target': ['stool'], 'anchors': [], 'anchor_ids': [], 'tokens_positive': [[33, 38], [4, 5], [55, 56]]}
         self.scan_dir = processed_scan_dir
+        self.scan_gt_pcd_data = {}
         self.process_vg_raw_data()
 
     def process_vg_raw_data(self):
@@ -140,6 +141,8 @@ class ESLabelPcdDataset(Dataset):
         """
             returns pcd_data and obj_pcds
         """
+        if scan_id in self.scan_gt_pcd_data:
+            return self.scan_gt_pcd_data[scan_id]
         pcd_data_path = os.path.join(self.scan_dir, 'pcd_with_global_alignment', f'{scan_id}.pth')
         if not os.path.exists(pcd_data_path):
             print(f"Error: {pcd_data_path} does not exist.")
@@ -153,6 +156,7 @@ class ESLabelPcdDataset(Dataset):
             mask = instance_ids == obj_id
             obj_pcd = pcd_data[mask]
             obj_pcds.append(obj_pcd)
+        self.scan_gt_pcd_data[scan_id] = (pcd_data, obj_pcds)
         return pcd_data, obj_pcds
     
     def get_obj_fts(self, obj_pcds):
