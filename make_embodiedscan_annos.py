@@ -11,7 +11,9 @@ dataroot_mp3d = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/matterport3d/scans"
 dataroot_3rscan = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/3rscan/scans"
 dataroot_scannet = "/mnt/petrelfs/share_data/lvruiyuan/pcd_data/scannet/scans"
 output_dir = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_data_new"
+es_info_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_val_full.pkl"
 
+TYPE2INT = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"] # str2int
 
 def load_pcd_data(scene):
     pcd_file = os.path.join(DATAROOT, scene, "pc_infos.npy")
@@ -31,6 +33,7 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
     if os.path.exists(out_file_name) and not overwrite:
         return True
     pc, color, label = load_pcd_data(scene)
+    label = np.ones_like(label) * -100
     if np.isnan(pc).any() or np.isnan(color).any():
         print(f"nan detected in {scene}")
     instance_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
@@ -46,6 +49,7 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
     object_types = [object_types[index] for index in sorted_indices_list]
 
     for box, obj_id, obj_type in zip(bboxes, object_ids, object_types):
+        obj_type_id = TYPE2INT.get(obj_type, -1)
         center, size, euler = box[:3], box[3:6], box[6:]
         R = euler_angles_to_matrix(euler, convention="ZXY")
         R = R.reshape((3,3))
@@ -54,6 +58,8 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
         # if num_points_in_box == 0:
         #     print(f"do not contain points: {obj_type}, {obj_id}")
         instance_ids[box_pc_mask] = obj_id
+        label[box_pc_mask] = obj_type_id
+
     out_data = (pc, color, label, instance_ids)
     os.makedirs(os.path.dirname(out_file_name), exist_ok=True)
     torch.save(out_data, out_file_name)
@@ -149,7 +155,8 @@ if __name__ == "__main__":
     MODE = "scannet"
     assert MODE in ["mp3d", "3rscan", "scannet"]
     DATAROOT = eval(f"dataroot_{MODE}")
-    scene_list = os.listdir(DATAROOT)[:50]
+    scene_list = os.listdir(DATAROOT)
+    scene_list = scene_list[:50]
     scene_list = ["scene0000_00"]
     embodiedscan_annotation_files = [
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_train_full.pkl",
