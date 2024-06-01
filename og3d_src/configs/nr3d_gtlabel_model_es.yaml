@@ -29,7 +29,7 @@ model:
   obj_encoder:
     onehot_ft: false
     dim_ft: 300
-    dim_loc: 6
+    dim_loc: 9
     dropout: 0.1
     freeze: false
     freeze_bn: false

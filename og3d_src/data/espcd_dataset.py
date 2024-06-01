@@ -3,7 +3,6 @@ import json
 import numpy as np
 import random
 
-from utils.utils_read import read_annotation_pickles
 from transformers import AutoTokenizer
 
 import torch
@@ -33,6 +32,7 @@ except:
 # obj_ids = batch['obj_ids'] # list[ list['0', '2', '7', ...] ], len=64
 # txt_masks = batch['txt_masks'] # torch.bool([64, 28])
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
+from utils.utils_read import read_es_infos, apply_mapping_to_keys, RAW2NUM_3RSCAN, RAW2NUM_MP3D, NUM2RAW_3RSCAN, NUM2RAW_MP3D, sample_idx_to_scene_id
 
 class ESPcdDataset(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
@@ -41,8 +41,12 @@ class ESPcdDataset(Dataset):
         # self.word2vec = get_glove_word2vec(glove_embedding_file)
         self.word2vec = json.load(open(cat2vec_file, 'r'))
         self.word2vec_vocab = list(self.word2vec.keys())
-        self.es_info = read_annotation_pickles(es_info_file)
+        count_type_from_zero = True
+        self.es_info = read_es_infos(es_info_file, count_type_from_zero=count_type_from_zero)
+        self.es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
         self.type2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
+        if count_type_from_zero:
+            self.type2int = {k:v-1 for k, v in self.type2int.items()}
         # self.es_info[scene_id] = {
         #     "bboxes": bboxes,
         #     "object_ids": object_ids,
@@ -69,6 +73,11 @@ class ESPcdDataset(Dataset):
         for i, item in enumerate(self.vg_raw_data):
             item_id = f"esvg_{i}"
             scan_id = item['scan_id']
+            scan_id = sample_idx_to_scene_id(scan_id)
+            scan_id = NUM2RAW_3RSCAN.get(scan_id, scan_id)
+            if scan_id not in self.inst_colors:
+                num_drops += 1
+                continue
             obj_id_list = [int(x) for x in self.es_info[scan_id]['object_ids']] 
             txt = item['text']
             txt_ids = self.tokenizer.encode(txt) 
@@ -78,8 +87,7 @@ class ESPcdDataset(Dataset):
                 tgt_obj_idx = int(tgt_obj_idx[0]) if isinstance(tgt_obj_idx, list) else tgt_obj_idx
                 tgt_obj_idx = obj_id_list.index(tgt_obj_idx)
             except Exception as e:
-                print(e)
-                print(item)
+                num_drops += 1
                 continue
             tgt_type = item['target']
             tgt_obj_class = self.type2int[tgt_type[0] if isinstance(tgt_type, list) else tgt_type]
@@ -189,6 +197,7 @@ class ESPcdDataset(Dataset):
         # obj_lens = torch.LongTensor([item["obj_len"]])  # torch.int64 ([])
         obj_classes = torch.LongTensor(obj_item["obj_classes"])  # torch.int64 ([max_num_obj])
         tgt_obj_idxs = torch.LongTensor([item["tgt_obj_idx"]])  # torch.int64 ([])
+        assert len(tgt_obj_idxs) > 0
         tgt_obj_classes = torch.LongTensor([item["tgt_obj_class"]])  # torch.int64 ([])
         obj_ids = obj_item["obj_ids"]  # list['0', '2', '7', ...], all available object ids in the scan, not the target object ids
         # txt_masks = ... # torch.bool ([max_len_txt])
@@ -227,6 +236,8 @@ def espcd_collate_fn(data):
     outs['obj_classes'] = pad_sequence(
         outs['obj_classes'], batch_first=True, padding_value=-100
     )
-    outs['tgt_obj_idxs'] = torch.LongTensor(outs['tgt_obj_idxs'])
+    outs['tgt_obj_idxs'] = torch.LongTensor(outs['tgt_obj_idxs']).repeat(1, 2)
+    outs['tgt_obj_idxs'][:, 1] = -1 #HACK: because loss has been modified
+    print(outs['tgt_obj_idxs'].shape)
     outs['tgt_obj_classes'] = torch.LongTensor(outs['tgt_obj_classes'])
     return outs

@@ -3,7 +3,6 @@ import json
 import numpy as np
 import random
 
-from utils.utils_read import read_annotation_pickles
 from transformers import AutoTokenizer
 
 import torch
@@ -32,16 +31,24 @@ except:
 # obj_ids = batch['obj_ids'] # list[ list['0', '2', '7', ...] ], len=64
 # txt_masks = batch['txt_masks'] # torch.bool([64, 28])
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
+from utils.utils_read import read_es_infos, apply_mapping_to_keys, RAW2NUM_3RSCAN, RAW2NUM_MP3D, NUM2RAW_3RSCAN, NUM2RAW_MP3D, to_sample_idx, to_scene_id, to_list_of_int, to_list_of_str
 
 class ESLabelDataset(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
         # from data.glove_embedding import get_glove_word2vec
-        # self.word2vec = get_glove_word2vec(glove_embedding_file)
-        self.word2vec = json.load(open(cat2vec_file, 'r'))
-        self.word2vec_vocab = list(self.word2vec.keys())
-        self.es_info = read_annotation_pickles(es_info_file)
+        # self.cat2vec = get_glove_word2vec(glove_embedding_file)
+        self.cat2vec = json.load(open(cat2vec_file, 'r'))
+        self.cat2vec["steps"] = self.cat2vec["step"]
+        self.word2vec_vocab = list(self.cat2vec.keys())
+        count_type_from_zero = True
+        self.es_info = read_es_infos(es_info_file, count_type_from_zero=count_type_from_zero)
+        self.es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
+        self.prev_es_info = read_es_infos("/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_infos_train_full.pkl", count_type_from_zero=count_type_from_zero)
+        self.prev_es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
         self.type2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
+        if count_type_from_zero:
+            self.type2int = {k:v-1 for k, v in self.type2int.items()}
         # self.es_info[scene_id] = {
         #     "bboxes": bboxes,
         #     "object_ids": object_ids,
@@ -61,79 +68,78 @@ class ESLabelDataset(Dataset):
         # 需要维护两份数据，一份是关于bbox和pcd的，一份是关于vg txt的
         # vg txt的一个dict的例子：{'scan_id': 'scene0000_00', 'target_id': ['30'], 'distractor_ids': [], 'text': 'The X is used for sitting at the table.Please find the X.', 'target': ['stool'], 'anchors': [], 'anchor_ids': [], 'tokens_positive': [[33, 38], [4, 5], [55, 56]]}
         self.scan_dir = processed_scan_dir
+        self.prepare_inst_colors()
         self.process_vg_raw_data()
 
     def process_vg_raw_data(self):
         self.vg_data = []
+        num_drops = 0
         for i, item in enumerate(self.vg_raw_data):
-            item_id = f"esvg_{i}"
+            item_id = "es" + str(i)
             scan_id = item['scan_id']
-            obj_id_list = [int(x) for x in self.es_info[scan_id]['object_ids']] 
+            scan_id = to_scene_id(scan_id)
+            scan_id = NUM2RAW_3RSCAN.get(scan_id, scan_id)
+            es_info = self.es_info.get(scan_id)
+            if es_info is None:
+                num_drops += 1 
+                continue
+            if scan_id not in self.inst_colors:
+                num_drops += 1
+                continue
+            obj_ids = [int(x) for x in es_info['object_ids']] 
+            types = es_info['object_types']
             txt = item['text']
             txt_ids = self.tokenizer.encode(txt) 
             txt_len = len(txt_ids)
+            target_ids = to_list_of_int(item.get("target_id", []))
+            tgt_num = len(target_ids)
             try:
-                tgt_obj_idx = item['target_id']
-                tgt_obj_idx = int(tgt_obj_idx[0]) if isinstance(tgt_obj_idx, list) else tgt_obj_idx
-                tgt_obj_idx = obj_id_list.index(tgt_obj_idx)
+                target_idxs = [obj_ids.index(x) for x in target_ids]
             except Exception as e:
-                print(e)
-                print(item)
+                num_drops += 1
                 continue
-            tgt_type = item['target']
-            tgt_obj_class = self.type2int[tgt_type[0] if isinstance(tgt_type, list) else tgt_type]
+            target_types = [types[_] for _ in target_idxs]
+            tgt_obj_class = [self.type2int[x] for x in target_types]
+
             vg_item = {
                 "item_id": item_id,
                 "scan_id": scan_id,
                 "txt_ids": txt_ids,
                 "txt_len": txt_len,
-                "tgt_obj_idx": tgt_obj_idx,
+                "tgt_obj_idx": target_idxs,
                 "tgt_obj_class": tgt_obj_class,
+                "tgt_num": tgt_num,
             }
             self.vg_data.append(vg_item)
         del self.vg_raw_data
 
-    def do_word2vec(self, text):
-        # for ood vocab (multiword): take average.
-        if text in self.word2vec:
-            return self.word2vec[text]
-        else:
-            key = random.choice(self.word2vec_vocab)
-            return self.word2vec[key]
-
-    def get_obj_inputs(self, scan_id):
-        # obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']] 
-        obj_ids = [str(x) for x in range(len(self.es_info[scan_id]['object_ids']))]
-        # print(obj_ids)
-        # NOTE: the object id is not compact. Do not use this obj_id to look up for es annos
-        obj_classes = self.es_info[scan_id]['object_type_ints'] 
-        obj_labels = self.es_info[scan_id]['object_types']
-        # obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
-        obj_locs = self.es_info[scan_id]['bboxes']
-        obj_colors = self.get_inst_colors(scan_id)
-        scan_pcd, obj_pcds = self.get_scan_gt_pcd_data(scan_id)
-        obj_fts = self.get_obj_fts(obj_pcds)
-        obj_item = {
-            "obj_ids": obj_ids,
-            # "obj_gt_fts": obj_gt_fts,
-            "obj_fts": obj_fts,
-            "obj_locs": obj_locs,
-            "obj_colors": obj_colors,
-            "obj_classes": obj_classes,
-            "obj_labels": obj_labels,
-        }
-        return obj_item
+    def prepare_inst_colors(self):
+        self.inst_colors = {}
+        num_dropped = 0
+        for scan_id in self.scan_ids:
+            fname = os.path.join(self.scan_dir, 'instance_id_to_gmm_color', f'{scan_id}.json')
+            if not os.path.exists(fname):
+                num_dropped += 1
+                continue
+            with open(fname, 'r') as f:
+                inst_colors = json.load(f)
+            inst_colors = [np.concatenate(
+                [np.array(x['weights'])[:, None], np.array(x['means'])],
+                axis=1
+            ).astype(np.float32) for x in inst_colors]
+            inst_colors = np.array(inst_colors)
+            obj_ids = self.es_info[scan_id]["object_ids"]
+            prev_obj_ids = self.prev_es_info[scan_id]["object_ids"]
+            index_list = np.where(obj_ids == prev_obj_ids[:, np.newaxis])[0]
+            if not len(index_list) == len(obj_ids):
+                num_dropped
+                continue
+            inst_colors = inst_colors[index_list]
+            self.inst_colors[scan_id] = inst_colors
+        print(f"colors: dropped {num_dropped} scenes and keeped {len(list(self.inst_colors.keys()))}")
 
     def get_inst_colors(self, scan_id):
-        fname = os.path.join(self.scan_dir, 'instance_id_to_gmm_color', f'{scan_id}.json')
-        with open(fname, 'r') as f:
-            inst_colors = json.load(f)
-        inst_colors = [np.concatenate(
-            [np.array(x['weights'])[:, None], np.array(x['means'])],
-            axis=1
-        ).astype(np.float32) for x in inst_colors]
-        inst_colors = np.array(inst_colors)
-        return inst_colors
+        return self.inst_colors[scan_id]
 
     def get_scan_gt_pcd_data(self, scan_id):
         """
@@ -154,57 +160,69 @@ class ESLabelDataset(Dataset):
             obj_pcds.append(obj_pcd)
         return pcd_data, obj_pcds
     
-    def get_obj_fts(self, obj_pcds):
-        obj_fts = []
-        for obj_pcd in obj_pcds:
-            if len(obj_pcd) > 0:
-                pcd_idxs = np.random.choice(len(obj_pcd), size=self.num_points, replace=(len(obj_pcd) < self.num_points))
-                obj_pcd = obj_pcd[pcd_idxs]
-                obj_pcd[:, :3] = obj_pcd[:, :3] - obj_pcd[:, :3].mean(0)
-                max_dist = np.max(np.sqrt(np.sum(obj_pcd[:, :3]**2, 1)))
-                if max_dist < 1e-6: # take care of tiny point-clouds, i.e., padding
-                    max_dist = 1
-                obj_pcd[:, :3] = obj_pcd[:, :3] / max_dist
-            else:
-                obj_pcd = np.zeros((self.num_points, 6))
-            obj_fts.append(obj_pcd)
-        obj_fts = np.array(obj_fts)
-        return obj_fts
-
     def __len__(self):
         return len(self.vg_data)
+    
+    def _get_obj_inputs(self, scan_id):
+    # obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']] 
+        obj_ids = [str(x) for x in range(len(self.es_info[scan_id]['object_ids']))]
+        # print(obj_ids)
+        # NOTE: the object id is not compact. Do not use this obj_id to look up for es annos
+        obj_classes = self.es_info[scan_id]['object_type_ints'] 
+        obj_labels = self.es_info[scan_id]['object_types']
+        # obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
+        obj_locs = self.es_info[scan_id]['bboxes']
+        obj_colors = self.get_inst_colors(scan_id)
+        scan_pcd, obj_pcds = self.get_scan_gt_pcd_data(scan_id)
+        obj_item = {
+            "obj_ids": obj_ids,
+            "obj_locs": obj_locs,
+            "obj_colors": obj_colors,
+            "obj_classes": obj_classes,
+            "obj_labels": obj_labels,
+        }
+        return obj_item
+
 
     def __getitem__(self, idx):
         item = self.vg_data[idx]
-        obj_item = self.get_obj_inputs(item["scan_id"])
+        obj_item = self._get_obj_inputs(item["scan_id"])
         item_ids = item["item_id"] # str
         scan_ids = item["scan_id"] # str
         txt_ids = torch.LongTensor(item["txt_ids"])  # torch.int64 ([max_len_txt])
         txt_lens = torch.LongTensor([item["txt_len"]])  # torch.int64 ([])
         # obj_gt_fts = torch.FloatTensor(obj_item["obj_gt_fts"])  # torch.float32 ([max_num_obj, 300])
-        obj_fts = torch.FloatTensor(obj_item["obj_fts"])  # torch.float32 ([max_num_obj, 1024, 6])
         obj_locs = torch.FloatTensor(obj_item["obj_locs"])  # torch.float32 ([max_num_obj, 6/9])
         obj_colors = torch.FloatTensor(obj_item["obj_colors"])  # torch.float32 ([max_num_obj, 3, 4])
         # obj_lens = torch.LongTensor([item["obj_len"]])  # torch.int64 ([])
         obj_classes = torch.LongTensor(obj_item["obj_classes"])  # torch.int64 ([max_num_obj])
-        tgt_obj_idxs = torch.LongTensor([item["tgt_obj_idx"]])  # torch.int64 ([])
-        tgt_obj_classes = torch.LongTensor([item["tgt_obj_class"]])  # torch.int64 ([])
+        tgt_obj_idxs = torch.LongTensor(item["tgt_obj_idx"])  # torch.int64 ([num targets]) new!
+        tgt_obj_classes = torch.LongTensor(item["tgt_obj_class"])  # torch.int64 (num targets) new!
+        tgt_num = torch.LongTensor([item["tgt_num"]])  # torch.int64 ([])
         obj_ids = obj_item["obj_ids"]  # list['0', '2', '7', ...], all available object ids in the scan, not the target object ids
         # txt_masks = ... # torch.bool ([max_len_txt])
         # obj_masks = ... # torch.bool ([max_num_obj])
+        aug_obj_labels = obj_item["obj_labels"]
+        aug_obj_classes = torch.LongTensor([self.type2int[x] for x in aug_obj_labels])
+        if self.cat2vec is None:
+            aug_obj_fts = aug_obj_classes
+        else:
+            aug_obj_fts = torch.FloatTensor([self.cat2vec[x] for x in aug_obj_labels])
+        
         outs = {
             "item_ids": item_ids,
             "scan_ids": scan_ids,
             "txt_ids": txt_ids,
             "txt_lens": txt_lens,
-            "obj_fts": obj_fts,
+            "obj_fts": aug_obj_fts,
             "obj_locs": obj_locs,
             "obj_colors": obj_colors,
-            "obj_lens": len(obj_fts),
+            "obj_lens": len(aug_obj_fts),
             "obj_classes": obj_classes,
             "tgt_obj_idxs": tgt_obj_idxs,
             "tgt_obj_classes": tgt_obj_classes,
             "obj_ids": obj_ids,
+            "tgt_num": tgt_num,
         }
         return outs
 
@@ -230,6 +248,9 @@ def eslabel_collate_fn(data):
     outs['obj_classes'] = pad_sequence(
         outs['obj_classes'], batch_first=True, padding_value=-100
     )
-    outs['tgt_obj_idxs'] = torch.LongTensor(outs['tgt_obj_idxs'])
-    outs['tgt_obj_classes'] = torch.LongTensor(outs['tgt_obj_classes'])
+    outs['tgt_num'] = torch.LongTensor(outs['tgt_num'])
+    outs['tgt_obj_idxs'] = pad_tensors(outs['tgt_obj_idxs'], lens=outs['tgt_num'], pad=-1) # torch.Size([64, 26])
+    outs['tgt_obj_classes'] = pad_tensors(outs['tgt_obj_classes'], lens=outs['tgt_num'], pad=-100)
+    outs['tgt_masks'] = gen_seq_masks(outs['tgt_num'])
+
     return outs

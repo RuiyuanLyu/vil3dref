@@ -137,8 +137,6 @@ class GTLabelPcdDataset(GTLabelDataset):
         txt_tokens = torch.LongTensor(item['enc_tokens'][:self.max_txt_len])
         tgt_obj_idx = item['target_id']
         tgt_obj_type = item['instance_type']
-
-        txt_tokens = torch.LongTensor(item['enc_tokens'][:self.max_txt_len])
         txt_lens = len(txt_tokens)
 
         if self.gt_scan_dir is None or item['max_iou'] > self.iou_replace_gt:

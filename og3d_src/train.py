@@ -24,55 +24,49 @@ from optim.misc import build_optimizer
 
 from parser import load_parser, parse_with_config
 
-from data.gtlabel_dataset import GTLabelDataset, gtlabel_collate_fn
-from data.gtpcd_dataset import GTPcdDataset, gtpcd_collate_fn
+from data.eslabel_dataset import ESLabelDataset, eslabel_collate_fn
+from data.espcd_dataset import ESPcdDataset, espcd_collate_fn
 
 from model.referit3d_net import ReferIt3DNet
 
 
 
 def build_gtlabel_datasets(data_cfg):
-    trn_dataset = GTLabelDataset(
-        data_cfg.trn_scan_split, data_cfg.anno_file, 
-        data_cfg.scan_dir, data_cfg.category_file,
-        cat2vec_file=data_cfg.cat2vec_file, 
-        max_txt_len=data_cfg.max_txt_len, max_obj_len=data_cfg.max_obj_len,
-        keep_background=data_cfg.keep_background,
-        random_rotate=data_cfg.random_rotate,
-        gt_scan_dir=data_cfg.get('gt_scan_dir', None),
-        iou_replace_gt=data_cfg.get('iou_replace_gt', 0),
+    trn_dataset = ESLabelDataset(
+        es_info_file="/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_infos_train.pkl",
+        # vg_raw_data_file="/mnt/hwfile/OpenRobotLab/lvruiyuan/es_gen_text/VG.json",
+        vg_raw_data_file='/mnt/hwfile/OpenRobotLab/lvruiyuan/es_gen_text/vg_full/VG_train_10Percent_flattened_token_positive.json',
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
+        processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
-    val_dataset = GTLabelDataset(
-        data_cfg.val_scan_split, data_cfg.anno_file, 
-        data_cfg.scan_dir, data_cfg.category_file,
-        cat2vec_file=data_cfg.cat2vec_file,
-        max_txt_len=None, max_obj_len=None, 
-        keep_background=data_cfg.keep_background,
-        random_rotate=False,
-        gt_scan_dir=data_cfg.get('gt_scan_dir', None),
-        iou_replace_gt=data_cfg.get('iou_replace_gt', 0),
+    val_dataset = ESLabelDataset(
+        es_info_file="/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_infos_val.pkl",
+        # vg_raw_data_file="/mnt/hwfile/OpenRobotLab/lvruiyuan/es_gen_text/VG.json",
+        vg_raw_data_file='/mnt/hwfile/OpenRobotLab/lvruiyuan/es_gen_text/vg_full/VG_val_5Percent_flattened_token_positive.json',
+        cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
+        processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     return trn_dataset, val_dataset
 
-def build_gtpcd_datasets(data_cfg):
-    trn_dataset = GTPcdDataset(
-        data_cfg.trn_scan_split, data_cfg.anno_file, 
-        data_cfg.scan_dir, data_cfg.category_file,
-        cat2vec_file=data_cfg.cat2vec_file, 
-        random_rotate=data_cfg.random_rotate,
-        max_txt_len=data_cfg.max_txt_len, max_obj_len=data_cfg.max_obj_len,
-        keep_background=data_cfg.keep_background,
-        num_points=data_cfg.num_points, in_memory=True,
-    )
-    val_dataset = GTPcdDataset(
-        data_cfg.val_scan_split, data_cfg.anno_file, 
-        data_cfg.scan_dir, data_cfg.category_file,
-        cat2vec_file=data_cfg.cat2vec_file,
-        max_txt_len=None, max_obj_len=None, random_rotate=False,
-        keep_background=data_cfg.keep_background,
-        num_points=data_cfg.num_points, in_memory=True,
-    )
-    return trn_dataset, val_dataset
+# def build_gtpcd_datasets(data_cfg):
+#     trn_dataset = ESPcdDataset(
+#         data_cfg.trn_scan_split, data_cfg.anno_file, 
+#         data_cfg.scan_dir, data_cfg.category_file,
+#         cat2vec_file=data_cfg.cat2vec_file, 
+#         random_rotate=data_cfg.random_rotate,
+#         max_txt_len=data_cfg.max_txt_len, max_obj_len=data_cfg.max_obj_len,
+#         keep_background=data_cfg.keep_background,
+#         num_points=data_cfg.num_points, in_memory=True,
+#     )
+#     val_dataset = ESPcdDataset(
+#         data_cfg.val_scan_split, data_cfg.anno_file, 
+#         data_cfg.scan_dir, data_cfg.category_file,
+#         cat2vec_file=data_cfg.cat2vec_file,
+#         max_txt_len=None, max_obj_len=None, random_rotate=False,
+#         keep_background=data_cfg.keep_background,
+#         num_points=data_cfg.num_points, in_memory=True,
+#     )
+#     return trn_dataset, val_dataset
 
 
 def main(opts):
@@ -133,10 +127,10 @@ def main(opts):
     data_cfg = EasyDict(opts.dataset)
     if model_config.model_type == 'gtlabel':
         trn_dataset, val_dataset = build_gtlabel_datasets(data_cfg)
-        collate_fn = gtlabel_collate_fn
+        collate_fn = eslabel_collate_fn
     elif model_config.model_type == 'gtpcd':
         trn_dataset, val_dataset = build_gtpcd_datasets(data_cfg)
-        collate_fn = gtpcd_collate_fn
+        collate_fn = espcd_collate_fn
     LOGGER.info('train #scans %d, #data %d' % (len(trn_dataset.scan_ids), len(trn_dataset)))
     LOGGER.info('val #scans %d, #data %d' % (len(val_dataset.scan_ids), len(val_dataset)))
 
@@ -301,15 +295,26 @@ def validate(model, model_cfg, val_dataloader, niters=None, return_preds=False):
         for lk, lv in loss_dict.items():
             avg_metrics[lk].update(lv, n=batch_size)
 
-        og3d_preds = torch.argmax(result['og3d_logits'], dim=1).cpu()
+        # og3d_preds = torch.argmax(result['og3d_logits'], dim=1).cpu()
+        og3d_preds = (result['og3d_logits'] > 0).cpu().numpy()
+        tgt_mask = np.zeros_like(og3d_preds)
+        for i, instance_idxs in enumerate(batch['tgt_obj_idxs']):
+            for idx in instance_idxs:
+                if idx >= 0:  
+                    tgt_mask[i, idx] = 1    
+        successful_preds = (og3d_preds == tgt_mask).sum(axis=-1)
+        obj_lens = batch['obj_lens'].cpu().numpy()
+        max_len = obj_lens.max()
+        successful_preds -= max_len - obj_lens
+
         avg_metrics['acc/og3d'].update(
-            torch.mean((og3d_preds == batch['tgt_obj_idxs']).float()).item(),
-            n=batch_size
+            successful_preds.sum(),
+            n=obj_lens.sum()
         )
-        avg_metrics['acc/og3d_class'].update(
-            torch.mean((batch['obj_classes'].gather(1, og3d_preds.unsqueeze(1)).squeeze(1) == batch['tgt_obj_classes']).float()).item(),
-            n=batch_size
-        )
+        # avg_metrics['acc/og3d_class'].update(
+        #     torch.mean((batch['obj_classes'].gather(1, og3d_preds.unsqueeze(1)).squeeze(1) == batch['tgt_obj_classes']).float()).item(),
+        #     n=batch_size
+        # )
         if model_cfg.losses.obj3d_clf > 0:
             obj3d_clf_preds = torch.argmax(result['obj3d_clf_logits'], dim=2).cpu()
             avg_metrics['acc/obj3d_clf'].update(
@@ -322,12 +327,12 @@ def validate(model, model_cfg, val_dataloader, niters=None, return_preds=False):
                 (obj3d_clf_preds[batch['obj_masks']] == batch['obj_classes'][batch['obj_masks']]).float().mean().item(),
                 n=batch['obj_masks'].sum().item()
             )
-        if model_cfg.losses.txt_clf > 0:
-            txt_clf_preds = torch.argmax(result['txt_clf_logits'], dim=1).cpu()
-            avg_metrics['acc/txt_clf'].update(
-                (txt_clf_preds == batch['tgt_obj_classes']).float().mean().item(),
-                n=batch_size
-            )
+        # if model_cfg.losses.txt_clf > 0:
+        #     txt_clf_preds = torch.argmax(result['txt_clf_logits'], dim=1).cpu()
+        #     avg_metrics['acc/txt_clf'].update(
+        #         (txt_clf_preds == batch['tgt_obj_classes']).float().mean().item(),
+        #         n=batch_size
+        #     )
             
         if return_preds:
             for ib in range(batch_size):

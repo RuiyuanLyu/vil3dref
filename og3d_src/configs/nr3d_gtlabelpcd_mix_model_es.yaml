@@ -8,7 +8,7 @@ local_rank: -1
 rank: -1
 
 seed: 0
-num_epoch: 100
+num_epoch: 50
 batch_size: 64
 weight_decay: 0.01
 optim: adamw
@@ -20,7 +20,7 @@ betas: [0.9, 0.98]
 warmup_steps: 5000
 grad_norm: 5.0
 num_workers: 4
-val_every_epoch: 1
+val_every_epoch: 5
 
 model:
   hidden_size: 768

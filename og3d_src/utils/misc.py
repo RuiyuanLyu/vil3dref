@@ -16,6 +16,9 @@ def set_random_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+import os
+import subprocess
+
 def set_cuda(opts) -> Tuple[bool, int, torch.device]:
     """
     Initialize CUDA for distributed computing

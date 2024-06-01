@@ -20,7 +20,6 @@ from utils.logger import LOGGER, TB_LOGGER, AverageMeter, RunningMeter, add_log_
 from utils.save import ModelSaver, save_training_meta
 from utils.misc import NoOp, set_random_seed, set_cuda, wrap_model
 from utils.distributed import all_gather
-from utils.utils_read import read_annotation_pickles
 
 from optim import get_lr_sched
 from optim.misc import build_optimizer
@@ -45,6 +44,7 @@ class PcdClassifier(nn.Module):
         logits = self.obj3d_clf_pre_head(obj_embeds)
         return logits
 
+from utils.utils_read import read_es_infos, apply_mapping_to_keys, RAW2NUM_3RSCAN, RAW2NUM_MP3D, NUM2RAW_3RSCAN, NUM2RAW_MP3D, sample_idx_to_scene_id
 
 class PcdDataset(Dataset):
     # def __init__(
@@ -54,7 +54,13 @@ class PcdDataset(Dataset):
     # ):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
-        self.es_info = read_annotation_pickles(es_info_file)
+        count_type_from_zero = True
+        self.es_info = read_es_infos(es_info_file, count_type_from_zero=count_type_from_zero)
+        self.es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
+        self.cat2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
+        if count_type_from_zero:
+            self.cat2int = {k:v-1 for k, v in self.cat2int.items()}
+        self.int2cat = {v:k for k,v in self.cat2int.items()}
 
         scan_ids = list(self.es_info.keys())
 
@@ -72,17 +78,21 @@ class PcdDataset(Dataset):
         self.num_points = 1024
         self.with_rgb = True
 
-        # self.int2cat = json.load(open(category_file, 'r'))
-        # self.cat2int = {w: i for i, w in enumerate(self.int2cat)}
-        self.cat2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
-        self.int2cat = {v:k for k,v in self.cat2int.items()}
-
         self.data = []
+        self.cnt1 = 0
+        self.cnt2 = 0
         for scan_id in self.scan_ids:
             pcd_path = os.path.join(self.scan_dir, 'pcd_with_global_alignment', '%s.pth'%scan_id)
             if not os.path.exists(pcd_path):
+                print(f"missing pcdpath {pcd_path}")
                 continue
             pcds, colors, _, instance_labels = torch.load(pcd_path)
+            self.cnt1+=1
+            # if np.min(colors) >= 0:
+            #     self.cnt2+=1
+            #     print(f"warning:{scan_id} min color > 0")
+            #     print(f"{self.cnt2}/{self.cnt1}")
+
             # obj_labels = json.load(open(
             #     os.path.join(self.scan_dir, 'instance_id_to_name', '%s.json'%scan_id)
             # ))
@@ -93,7 +103,7 @@ class PcdDataset(Dataset):
                     continue
                 mask = instance_labels == int(obj_id) 
                 if np.sum(mask) == 0:
-                    print('scan: %s, obj %d' %(scan_id, obj_id))
+                    print('filtered scan: %s, obj %d' %(scan_id, obj_id))
                     continue
                 obj_pcd = pcds[mask]
                 obj_color = colors[mask]
@@ -103,7 +113,10 @@ class PcdDataset(Dataset):
                 if max_dist < 1e-6: # take care of tiny point-clouds, i.e., padding
                     max_dist = 1
                 obj_pcd = obj_pcd / max_dist
-                obj_color = obj_color / 127.5 - 1
+                # obj_color already in [0, 1], need to map to -1, 1
+                obj_color = obj_color *2 - 1
+                assert np.min(obj_color) >= -1
+                assert np.max(obj_color) <= 1
                 if self.with_rgb:
                     self.data.append((np.concatenate([obj_pcd, obj_color], 1), self.cat2int[obj_label]))
                 else:
@@ -218,14 +231,14 @@ def main(opts):
     #     with_rgb=data_cfg.with_rgb,
     # )
     trn_dataset = PcdDataset(
-        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl",
-        vg_raw_data_file="../datasets/VG.json",
+        es_info_file="../embodiedscan_infos/embodiedscan_infos_train.pkl",
+        vg_raw_data_file='/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_train_mini_vg.json',
         cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
         processed_scan_dir="../datasets/referit3d/scan_data_new"
     )
     val_dataset = PcdDataset(
-        es_info_file="../embodiedscan_infos/embodiedscan_infos_train_full.pkl", # temporary
-        vg_raw_data_file="../datasets/VG.json",
+        es_info_file="../embodiedscan_infos/embodiedscan_infos_val.pkl", 
+        vg_raw_data_file='/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_val_mini_vg.json',
         cat2vec_file='../datasets/referit3d/annotations/meta_data/cat2vec.json',
         processed_scan_dir="../datasets/referit3d/scan_data_new"
     )

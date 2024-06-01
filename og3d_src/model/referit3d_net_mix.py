@@ -11,7 +11,7 @@ from .obj_encoder import GTObjEncoder, PcdObjEncoder
 from .mmt_module import MMT
 from .cmt_module import CMT
 from .referit3d_net import get_mlp_head, freeze_bn
-from .referit3d_net import ReferIt3DNet
+from .referit3d_net_es import ReferIt3DNet
 
 
 class ReferIt3DNetMix(nn.Module):
@@ -21,12 +21,12 @@ class ReferIt3DNetMix(nn.Module):
         self.device = device
 
         self.teacher_eval_mode = config.get('teacher_eval_mode', False)
-
+        print("preparing teacher model...")
         teacher_model_cfg = copy.deepcopy(config)
         teacher_model_cfg.model_type = 'gtlabel'
         teacher_model_cfg.obj_encoder.use_color_enc = teacher_model_cfg.obj_encoder.teacher_use_color_enc
         self.teacher_model = ReferIt3DNet(teacher_model_cfg, device)
-
+        print("preparing student model...")
         student_model_cfg = copy.deepcopy(config)
         student_model_cfg.model_type = 'gtpcd'
         student_model_cfg.obj_encoder.use_color_enc = student_model_cfg.obj_encoder.student_use_color_enc

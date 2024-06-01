@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import mmengine
 import json
-from og3d_src.utils.utils_read import read_annotation_pickles
+from og3d_src.utils.utils_read import read_es_infos
 from utils.utils_3d import is_inside_box, euler_angles_to_matrix
 from utils.decorators import mmengine_track_func
 
@@ -29,6 +29,8 @@ def load_pcd_data(scene):
 def create_scene_pcd(scene, es_anno, overwrite=False):
     if es_anno is None:
         return None
+    if len(es_anno["bboxes"]) <= 0:
+        return None
     out_file_name = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
     if os.path.exists(out_file_name) and not overwrite:
         return True
@@ -37,7 +39,7 @@ def create_scene_pcd(scene, es_anno, overwrite=False):
     if np.isnan(pc).any() or np.isnan(color).any():
         print(f"nan detected in {scene}")
     instance_ids = np.ones(pc.shape[0], dtype=np.int16) * (-100)
-    bboxes =  es_anno["bboxes"]
+    bboxes =  es_anno["bboxes"].reshape(-1, 9)
     bboxes[:, 3:6] = np.clip(bboxes[:, 3:6], a_min=1e-2, a_max=None)
     object_ids = es_anno["object_ids"]
     object_types = es_anno["object_types"] # str
@@ -106,8 +108,10 @@ def create_instance_colors(scene, es_anno, overwrite=False):
     out_file_name = os.path.join(output_dir, 'instance_id_to_gmm_color', '%s.json'%scene)
     if os.path.exists(out_file_name) and not overwrite:
         return
-
     scan_file = os.path.join(output_dir,"pcd_with_global_alignment", f"{scene}.pth")
+    if not os.path.exists(scan_file):
+        print(f"not exist: {scan_file}")
+        return
     data = torch.load(scan_file) # xyz, rgb, obj_type, instance_labels
     _, colors, _, instance_labels = data
 
@@ -152,20 +156,20 @@ def create_all(scene, es_anno):
 
 
 if __name__ == "__main__":
-    MODE = "scannet"
+    MODE = "3rscan"
     assert MODE in ["mp3d", "3rscan", "scannet"]
     DATAROOT = eval(f"dataroot_{MODE}")
     scene_list = os.listdir(DATAROOT)
-    scene_list = scene_list[:50]
-    scene_list = ["scene0000_00"]
+    # scene_list = scene_list[:50]
+    # scene_list = ["scene0000_00"]
     embodiedscan_annotation_files = [
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_train_full.pkl",
         "/mnt/petrelfs/lvruiyuan/repos/vil3dref/embodiedscan_infos/embodiedscan_infos_val_full.pkl"
     ]
     train_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_train.txt"
     val_split_file = "/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/annotations/splits/es_val.txt"
-    anno_train = read_annotation_pickles(embodiedscan_annotation_files[0])
-    anno_val = read_annotation_pickles(embodiedscan_annotation_files[1])
+    anno_train = read_es_infos(embodiedscan_annotation_files[0])
+    anno_val = read_es_infos(embodiedscan_annotation_files[1])
     with open(f"embodiedscan_infos/3rscan_mapping.json", 'r') as f:
         scene_mappings = json.load(f)
     ####################################################################

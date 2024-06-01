@@ -139,7 +139,7 @@ class ReferIt3DNet(nn.Module):
         )
         
         og3d_logits = self.og3d_head(out_embeds['obj_embeds']).squeeze(2)
-        og3d_logits.masked_fill_(batch['obj_masks'].logical_not(), -float('inf'))
+        og3d_logits.masked_fill_(batch['obj_masks'].logical_not(), -1e6)
         result = {
             'og3d_logits': og3d_logits,
         }
@@ -167,8 +167,25 @@ class ReferIt3DNet(nn.Module):
     def compute_loss(self, result, batch):
         losses = {}
         total_loss = 0
-        
-        og3d_loss = F.cross_entropy(result['og3d_logits'], batch['tgt_obj_idxs'])
+        # print(result['og3d_logits'])
+        # print(result['og3d_logits'].shape)
+        # print(batch['tgt_obj_idxs'])
+        # print(batch['tgt_obj_idxs'].shape)
+        # Assertion `t >= 0 && t < n_classes` failed.  adjust max_obj_len in config
+        tgt_mask = torch.zeros_like(result['og3d_logits'])
+        for i, instance_idxs in enumerate(batch['tgt_obj_idxs']):
+            for idx in instance_idxs:
+                if idx >= 0:  
+                    tgt_mask[i, idx] = 1        
+        # TODO: optimize this
+        og3d_loss = F.binary_cross_entropy_with_logits(result['og3d_logits'], tgt_mask)
+        # og3d_loss = F.cross_entropy(result['og3d_logits'], batch['tgt_obj_idxs'])
+        if torch.isnan(og3d_loss).any():
+            print(result['og3d_logits'])
+            print(result['og3d_logits'].shape)
+            print(tgt_mask)
+            print(tgt_mask.shape)
+            exit()
         losses['og3d'] = og3d_loss
         total_loss += og3d_loss
 
@@ -199,9 +216,17 @@ class ReferIt3DNet(nn.Module):
             total_loss += losses['obj3d_reg']
 
         if self.config.losses.txt_clf > 0:
-            txt_clf_loss = F.cross_entropy(
-                result['txt_clf_logits'], batch['tgt_obj_classes'],  reduction='mean'
-            )
+            # print(f"gt label: {batch['tgt_obj_classes']}") 
+            # print(f"logits shape: {result['txt_clf_logits'].shape}") # logits shape: torch.Size([64, 288])
+            tgt_mask = torch.zeros_like(result['txt_clf_logits'])
+            for i, instance_idxs in enumerate(batch['tgt_obj_classes']):
+                for idx in instance_idxs:
+                    if idx >= 0:  
+                        tgt_mask[i, idx] = 1        
+            txt_clf_loss = F.binary_cross_entropy_with_logits(result['txt_clf_logits'], tgt_mask)
+            # txt_clf_loss = F.cross_entropy(
+            #     result['txt_clf_logits'], batch['tgt_obj_classes'],  reduction='mean'
+            # )
             losses['txt_clf'] = txt_clf_loss * self.config.losses.txt_clf
             total_loss += losses['txt_clf']
 

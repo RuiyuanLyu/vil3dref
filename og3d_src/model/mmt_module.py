@@ -117,6 +117,7 @@ class MMT(nn.Module):
         output_attentions=False, output_hidden_states=False,
     ):
         max_txt_len = txt_embeds.size(1)
+        print(max_txt_len)
         max_obj_len = obj_embeds.size(1)
 
         hidden_states = torch.cat([txt_embeds, obj_embeds], dim=1)

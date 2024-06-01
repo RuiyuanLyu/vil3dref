@@ -4,6 +4,7 @@ import numpy as np
 import random
 
 from transformers import AutoTokenizer
+from sklearn.mixture import GaussianMixture
 
 import torch
 from torch.utils.data import Dataset
@@ -12,6 +13,7 @@ try:
     from .common import pad_tensors, gen_seq_masks
 except:
     from common import pad_tensors, gen_seq_masks
+MAX_NUM_OBJ = 256
 
 
 # target: to make batches.
@@ -34,7 +36,7 @@ except:
 # obj_masks = batch['obj_masks'] # torch.bool([64, 69])
 from utils.utils_read import read_es_infos, apply_mapping_to_keys, RAW2NUM_3RSCAN, RAW2NUM_MP3D, NUM2RAW_3RSCAN, NUM2RAW_MP3D, to_sample_idx, to_scene_id, to_list_of_int, to_list_of_str
 from utils.utils_3d import compute_bbox_from_points_list
-class ESLabelPcdDataset(Dataset):
+class ESLabelPcdDatasetEval(Dataset):
     def __init__(self, es_info_file, vg_raw_data_file, cat2vec_file, processed_scan_dir):
         super().__init__()
         # from data.glove_embedding import get_glove_word2vec
@@ -44,33 +46,18 @@ class ESLabelPcdDataset(Dataset):
         count_type_from_zero = True
         self.es_info = read_es_infos(es_info_file, count_type_from_zero=count_type_from_zero)
         self.es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
-        self.prev_es_info = read_es_infos("/mnt/hwfile/OpenRobotLab/lvruiyuan/embodiedscan_infos/embodiedscan_infos_train_full.pkl", count_type_from_zero=count_type_from_zero)
-        self.prev_es_info = apply_mapping_to_keys(self.es_info, NUM2RAW_3RSCAN)
         # NOTE: prev es_info is used to fix the bug in gmm color loading.
         self.type2int = np.load(es_info_file, allow_pickle=True)["metainfo"]["categories"]
         if count_type_from_zero:
             self.type2int = {k:v-1 for k, v in self.type2int.items()}
-        # self.es_info[scene_id] = {
-        #     "bboxes": bboxes,
-        #     "object_ids": object_ids,
-        #     "object_types": object_types,
-        #     "visible_view_object_dict": visible_view_object_dict,
-        #     "extrinsics_c2w": extrinsics_c2w,
-        #     "axis_align_matrix": axis_align_matrix,
-        #     "intrinsics": intrinsics,
-        #     "depth_intrinsics": depth_intrinsics,
-        #     "image_paths": image_paths,
-        # }
         self.vg_raw_data = json.load(open(vg_raw_data_file, 'r'))
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
         self.scan_ids = list(self.es_info.keys())
         self.num_scans = len(self.scan_ids)
         self.num_points = 1024 # number of points to sample from each object
-        # 需要维护两份数据，一份是关于bbox和pcd的，一份是关于vg txt的
-        # vg txt的一个dict的例子：{'scan_id': 'scene0000_00', 'target_id': ['30'], 'distractor_ids': [], 'text': 'The X is used for sitting at the table.Please find the X.', 'target': ['stool'], 'anchors': [], 'anchor_ids': [], 'tokens_positive': [[33, 38], [4, 5], [55, 56]]}
         self.scan_dir = processed_scan_dir
         self.scan_gt_pcd_data = {}
-        self.prepare_inst_colors()
+        self.inst_colors = {}
         self.process_vg_raw_data()
 
     def process_vg_raw_data(self):
@@ -84,9 +71,6 @@ class ESLabelPcdDataset(Dataset):
             es_info = self.es_info.get(scan_id)
             if es_info is None:
                 num_drops += 1 
-                continue
-            if scan_id not in self.inst_colors:
-                num_drops += 1
                 continue
             obj_ids = [int(x) for x in es_info['object_ids']] 
             bboxes = es_info['bboxes']
@@ -106,6 +90,8 @@ class ESLabelPcdDataset(Dataset):
             target_types = [types[_] for _ in target_idxs]
             tgt_obj_class = [self.type2int[x] for x in target_types]
 
+            # HACK: in this ESLabelPcdDatasetEval, the tgt_obj_idx should not take effect in the eval method we care. Only the target bboxes are important.
+            # ONLY the tgt_obj_box is used.
             sub_class = item.get("sub_class", "").lower()
             vg_item = {
                 "item_id": item_id,
@@ -131,54 +117,51 @@ class ESLabelPcdDataset(Dataset):
             return self.word2vec[key]
 
     def get_obj_inputs(self, scan_id):
-        # obj_ids = [str(x) for x in self.es_info[scan_id]['object_ids']] 
-        obj_ids = [str(x) for x in range(len(self.es_info[scan_id]['object_ids']))]
-        # print(obj_ids)
-        # NOTE: the object id is not compact. Do not use this obj_id to look up for es annos
-        obj_classes = self.es_info[scan_id]['object_type_ints']
-        obj_labels = self.es_info[scan_id]['object_types']
-        obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
-        obj_locs = self.es_info[scan_id]['bboxes']
         obj_colors = self.get_inst_colors(scan_id)
-        scan_pcd, obj_pcds = self.get_scan_gt_pcd_data(scan_id)
+        scan_pcd, obj_pcds, obj_locs = self.get_scan_gt_pcd_data(scan_id) #This do not provide gt, but predicted by other methods. 
+        num_objs = len(obj_pcds)
+        obj_labels = ["object" for _ in range(num_objs)] #HACK: for ESLabelPcdDatasetEval ONLY. The model should predict this label in the grounding phase.
+        obj_classes = [self.type2int[x] for x in obj_labels]
+        obj_gt_fts = [self.do_word2vec(obj_label) for obj_label in obj_labels]
+
         obj_fts = self.get_obj_fts(obj_pcds)
         obj_item = {
-            "obj_ids": obj_ids,
+            "obj_ids": [x for x in range(num_objs)],
             "obj_gt_fts": obj_gt_fts,
             "obj_fts": obj_fts,
-            "obj_locs": obj_locs,
+            "obj_locs": np.array(obj_locs), # should be [num_objs, 9], TODO: check this.
             "obj_colors": obj_colors,
             "obj_classes": obj_classes,
             "obj_labels": obj_labels,
         }
         return obj_item
 
-    def prepare_inst_colors(self):
-        self.inst_colors = {}
-        num_dropped = 0
-        for scan_id in self.scan_ids:
-            fname = os.path.join(self.scan_dir, 'instance_id_to_gmm_color', f'{scan_id}.json')
-            if not os.path.exists(fname):
-                num_dropped += 1
-                continue
-            with open(fname, 'r') as f:
-                inst_colors = json.load(f)
-            inst_colors = [np.concatenate(
-                [np.array(x['weights'])[:, None], np.array(x['means'])],
-                axis=1
-            ).astype(np.float32) for x in inst_colors]
-            inst_colors = np.array(inst_colors)
-            obj_ids = self.es_info[scan_id]["object_ids"]
-            prev_obj_ids = self.prev_es_info[scan_id]["object_ids"]
-            index_list = np.where(obj_ids == prev_obj_ids[:, np.newaxis])[0]
-            if not len(index_list) == len(obj_ids):
-                num_dropped
-                continue
-            inst_colors = inst_colors[index_list]
-            self.inst_colors[scan_id] = inst_colors
-        print(f"colors: dropped {num_dropped} scenes and keeped {len(list(self.inst_colors.keys()))}")
-
     def get_inst_colors(self, scan_id):
+        fname = os.path.join('/mnt/petrelfs/lvruiyuan/repos/vil3dref/datasets/referit3d/scan_data_for_es_pred', 'instance_id_to_gmm_color', f'{scan_id}.npy')
+        if scan_id in self.inst_colors:
+            return self.inst_colors[scan_id]
+        if os.path.exists(fname):
+            obj_colors = np.load(fname)
+            if MAX_NUM_OBJ <= len(obj_colors):
+                self.inst_colors[scan_id] = obj_colors[:MAX_NUM_OBJ]
+                return self.inst_colors[scan_id]
+            # In the saved file, the max num obj might be different
+        obj_pcds = self.get_scan_gt_pcd_data(scan_id)[1]
+        num_objs = len(obj_pcds)
+        obj_colors = []
+        for i in range(num_objs):
+            color = obj_pcds[i][:, 3:6]
+            if len(color) > 10:
+                gm = GaussianMixture(n_components=3, covariance_type='full', random_state=0).fit(color)
+                weights = gm.weights_
+                means = gm.means_
+                obj_colors.append(np.concatenate([weights[:, None], means], 1))
+            else:
+                obj_colors.append(np.zeros((3,4)))
+            # assert obj_colors[-1].shape == (3, 4), f"Error: {obj_colors[-1].shape}"
+        obj_colors = np.array(obj_colors)
+        self.inst_colors[scan_id] = obj_colors
+        np.save(fname, obj_colors)
         return self.inst_colors[scan_id]
 
     def get_scan_gt_pcd_data(self, scan_id):
@@ -194,14 +177,37 @@ class ESLabelPcdDataset(Dataset):
         data = torch.load(pcd_data_path)
         pc, colors, label, instance_ids = data
         pcd_data = np.concatenate([pc, colors], 1)
+        
+        mask_scan_id = RAW2NUM_3RSCAN.get(scan_id, scan_id)
+        mask_data_path = os.path.join("/mnt/hwfile/OpenRobotLab/lvruiyuan/pcd_data/embodiedscan_pred_mask_by_box", f"{mask_scan_id}.npz")
+        data = np.load(mask_data_path)
+        
+        masks = data['arr_0'] # shape num points, num_objs
+        label = data['arr_1'] # unused
+        score = data['arr_2'] 
+        # print(masks.shape, label.shape, score.shape)
+        inds = np.argsort(score)[::-1][:MAX_NUM_OBJ]
+        masks = masks[inds]
+        score = score[inds]
+        num_obj = len(inds)
+
         obj_pcds = []
-        for obj_id in self.es_info[scan_id]['object_ids']:
-            obj_id = int(obj_id)
-            mask = instance_ids == obj_id
+        obj_locs = []
+        from utils.utils_3d import compute_bbox_from_points, matrix_to_euler_angles
+        for obj_id in range(num_obj):
+            mask = masks[obj_id]
             obj_pcd = pcd_data[mask]
             obj_pcds.append(obj_pcd)
-        self.scan_gt_pcd_data[scan_id] = (pcd_data, obj_pcds)
-        return pcd_data, obj_pcds
+
+            if len(obj_pcd) > 10:
+                center, size, rotmat = compute_bbox_from_points(obj_pcd[:, :3])
+                euler = matrix_to_euler_angles(rotmat, "ZXY")
+                obj_loc = np.concatenate([center, size, euler]).reshape(9)
+            else:
+                obj_loc = np.zeros(9)
+            obj_locs.append(obj_loc)
+        self.scan_gt_pcd_data[scan_id] = (pcd_data, obj_pcds, obj_locs)
+        return pcd_data, obj_pcds, obj_locs
     
     def get_obj_fts(self, obj_pcds):
         obj_fts = []
